@@ -61,7 +61,7 @@ Herhangi bir derleme (build/npm) adımına ihtiyaç duymadan **1 dakika içinde*
 1. Bu depoyu indirin:
    - Sağ üstteki yeşil **Code** butonuna tıklayıp **Download ZIP** seçeneğini seçin ve zip dosyasını bir klasöre çıkartın, ya da terminalden klonlayın:
    ```bash
-   git clone https://github.com/KULLANICI_ADINIZ/LumaBorder.git
+   git clone https://github.com/alpersaat/LumaBorder.git
    ```
 2. Tarayıcınızı açın ve uzantılar sayfasına gidin:
    - **Google Chrome:** `chrome://extensions/`
