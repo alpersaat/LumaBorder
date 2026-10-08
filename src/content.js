@@ -1,5 +1,5 @@
 /**
- * LumaBorder - YouTube Ambient Light & Glow
+ * LumaBorder - Dynamic Video Glow & Border Engine
  * Content Script (All-in-one standalone, zero-dependency, ultra-fast)
  */
 
@@ -13,10 +13,10 @@
   const translations = {
     tr: {
       appName: "LumaBorder",
-      appTagline: "YouTube™ İçin Ortam Işığı & Glow",
+      appTagline: "Dinamik Glow & Işık Efekti",
       statusActive: "Aktif",
       statusInactive: "Pasif",
-      masterToggle: "Ortam Işığını Etkinleştir",
+      masterToggle: "Glow Efektini Etkinleştir",
       masterToggleDesc: "Video etrafındaki dinamik ışık halesini açar/kapatır",
       tabGeneral: "Genel",
       tabEffects: "Işık & Renk",
@@ -43,10 +43,10 @@
     },
     en: {
       appName: "LumaBorder",
-      appTagline: "Ambient Light for YouTube™",
+      appTagline: "Dynamic Glow Experience",
       statusActive: "Active",
       statusInactive: "Inactive",
-      masterToggle: "Enable Ambient Light",
+      masterToggle: "Enable Glow Effect",
       masterToggleDesc: "Toggles the dynamic glow aura around video",
       tabGeneral: "General",
       tabEffects: "Light & Color",
@@ -468,7 +468,7 @@
 
       this.button = document.createElement('button');
       this.button.className = 'ytp-button lumaborder-player-btn';
-      this.button.title = `${i18n.t('appName')} - ${i18n.t('appTagline')}`;
+      this.button.title = `${i18n.t('appName')}`;
       this.button.setAttribute('aria-haspopup', 'true');
       this.button.setAttribute('aria-label', i18n.t('appName'));
 

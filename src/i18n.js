@@ -6,10 +6,10 @@
 export const translations = {
   tr: {
     appName: "LumaBorder",
-    appTagline: "YouTube™ İçin Ortam Işığı & Glow",
+    appTagline: "Dinamik Glow & Işık Efekti",
     statusActive: "Aktif",
     statusInactive: "Pasif",
-    masterToggle: "Ortam Işığını Etkinleştir",
+    masterToggle: "Glow Efektini Etkinleştir",
     masterToggleDesc: "Video etrafındaki dinamik ışık halesini açar/kapatır",
     
     // Sekmeler
@@ -20,7 +20,7 @@ export const translations = {
     
     // Ayarlar
     brightness: "Parlaklık",
-    brightnessDesc: "Ortam ışığının parlaklık seviyesi",
+    brightnessDesc: "Işık halesinin parlaklık seviyesi",
     spread: "Işık Yayılması",
     spreadDesc: "Işığın video kenarlarından ne kadar uzağa yayılacağı",
     blur: "Yumuşaklık (Bulanıklık)",
@@ -28,7 +28,7 @@ export const translations = {
     saturation: "Renk Canlılığı",
     saturationDesc: "Renklerin doygunluğu ve canlılık seviyesi",
     contrast: "Kontrast",
-    contrastDesc: "Ortam ışığının renk kontrastı",
+    contrastDesc: "Renk kontrastı",
     smoothing: "Kare Yumuşatma",
     smoothingDesc: "Kareler arası ani ışık patlamalarını yumuşatır",
     
@@ -58,15 +58,15 @@ export const translations = {
     close: "Kapat",
     settingsTitle: "LumaBorder Ayarları",
     quickControls: "Hızlı Kontroller",
-    notOnYoutube: "YouTube video sayfasında değilsiniz",
-    openYoutubeTip: "Bir YouTube videosu açtığınızda ortam ışığı otomatik başlayacaktır."
+    notOnYoutube: "Video sayfasında değilsiniz",
+    openYoutubeTip: "Bir video açtığınızda efekt otomatik başlayacaktır."
   },
   en: {
     appName: "LumaBorder",
-    appTagline: "Ambient Light & Glow for YouTube™",
+    appTagline: "Dynamic Glow Experience",
     statusActive: "Active",
     statusInactive: "Inactive",
-    masterToggle: "Enable Ambient Light",
+    masterToggle: "Enable Glow Effect",
     masterToggleDesc: "Toggles the dynamic glow aura around video",
     
     // Tabs
@@ -77,7 +77,7 @@ export const translations = {
     
     // Settings
     brightness: "Brightness",
-    brightnessDesc: "Brightness level of the ambient glow",
+    brightnessDesc: "Brightness level of the glow aura",
     spread: "Light Spread",
     spreadDesc: "How far the light aura spreads beyond video edges",
     blur: "Softness (Blur)",
@@ -85,7 +85,7 @@ export const translations = {
     saturation: "Color Vibrance",
     saturationDesc: "Vibrance and color saturation level",
     contrast: "Contrast",
-    contrastDesc: "Contrast of ambient colors",
+    contrastDesc: "Contrast of glow colors",
     smoothing: "Frame Smoothing",
     smoothingDesc: "Smooths abrupt color changes between frames",
     
@@ -97,7 +97,7 @@ export const translations = {
     theaterModeSync: "Enhanced Theater Mode",
     theaterModeSyncDesc: "Cinematically widens ambient aura in theater mode",
     fullScreenSync: "Fullscreen Sync",
-    fullScreenSyncDesc: "Fluid and optimized ambilight during fullscreen",
+    fullScreenSyncDesc: "Fluid and optimized glow during fullscreen",
     
     // Presets
     presetCinema: "Cinema",
@@ -115,8 +115,8 @@ export const translations = {
     close: "Close",
     settingsTitle: "LumaBorder Settings",
     quickControls: "Quick Controls",
-    notOnYoutube: "You are not on a YouTube video page",
-    openYoutubeTip: "Ambient light activates automatically when watching a video."
+    notOnYoutube: "Not on a video page",
+    openYoutubeTip: "Glow effect activates automatically when watching a video."
   }
 };
 
