@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LumaBorder - YouTube Ambient Light</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="brand">
+        <div class="logo-box">
+          <svg viewBox="0 0 24 24" class="logo-icon">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">LumaBorder</h1>
+          <p class="brand-sub" id="txt-appTagline">YouTube™ İçin Ortam Işığı</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="lang-pill" id="btn-lang-toggle">TR 🇹🇷</button>
+      </div>
+    </header>
+
+    <!-- Master Switch Card -->
+    <div class="card master-card">
+      <div class="card-info">
+        <div class="status-indicator" id="status-indicator"></div>
+        <div>
+          <div class="card-title" id="txt-masterToggle">Ortam Işığı</div>
+          <div class="card-desc" id="status-text">Aktif</div>
+        </div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="popup-master-toggle" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Presets Section -->
+    <div class="section-title" id="txt-tabPresets">Hızlı Profiller</div>
+    <div class="presets-row">
+      <button class="preset-pill active" data-preset="default">
+        <span>⚖️</span> <span id="txt-presetDefault">Dengeli</span>
+      </button>
+      <button class="preset-pill" data-preset="cinema">
+        <span>🎬</span> <span id="txt-presetCinema">Sinema</span>
+      </button>
+      <button class="preset-pill" data-preset="vibrant">
+        <span>⚡</span> <span id="txt-presetVibrant">Canlı</span>
+      </button>
+      <button class="preset-pill" data-preset="night">
+        <span>🌙</span> <span id="txt-presetNight">Gece</span>
+      </button>
+      <button class="preset-pill" data-preset="gaming">
+        <span>🎮</span> <span id="txt-presetGaming">Oyun</span>
+      </button>
+    </div>
+
+    <!-- Controls Section -->
+    <div class="section-title" id="txt-quickControls">Hızlı Ayarlar</div>
+    <div class="controls-list">
+      <!-- Parlaklık -->
+      <div class="control-group">
+        <div class="control-meta">
+          <span class="control-name" id="txt-brightness">Parlaklık</span>
+          <span class="control-val" id="val-brightness">100%</span>
+        </div>
+        <input type="range" class="range-slider" id="rng-brightness" min="20" max="250" value="100">
+      </div>
+
+      <!-- Yayılma -->
+      <div class="control-group">
+        <div class="control-meta">
+          <span class="control-name" id="txt-spread">Işık Yayılması</span>
+          <span class="control-val" id="val-spread">25%</span>
+        </div>
+        <input type="range" class="range-slider" id="rng-spread" min="5" max="100" value="25">
+      </div>
+
+      <!-- Yumuşaklık -->
+      <div class="control-group">
+        <div class="control-meta">
+          <span class="control-name" id="txt-blur">Yumuşaklık (Blur)</span>
+          <span class="control-val" id="val-blur">45px</span>
+        </div>
+        <input type="range" class="range-slider" id="rng-blur" min="10" max="120" value="45">
+      </div>
+
+      <!-- Canlılık -->
+      <div class="control-group">
+        <div class="control-meta">
+          <span class="control-name" id="txt-saturation">Renk Canlılığı</span>
+          <span class="control-val" id="val-saturation">120%</span>
+        </div>
+        <input type="range" class="range-slider" id="rng-saturation" min="50" max="220" value="120">
+      </div>
+    </div>
+
+    <!-- Extra Toggles -->
+    <div class="toggles-grid">
+      <label class="check-item">
+        <input type="checkbox" id="chk-letterbox" checked>
+        <span class="check-box"></span>
+        <span class="check-label" id="txt-letterboxDetection">Siyah Şeritleri Kırp</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="chk-eco" checked>
+        <span class="check-box"></span>
+        <span class="check-label" id="txt-ecoMode">Güç Tasarrufu</span>
+      </label>
+    </div>
+
+    <!-- Footer -->
+    <footer class="popup-footer">
+      <button class="btn-secondary" id="btn-reset" title="Sıfırla">
+        <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        <span id="txt-resetDefaults">Sıfırla</span>
+      </button>
+      <span class="footer-tag">LumaBorder v2.0</span>
+    </footer>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

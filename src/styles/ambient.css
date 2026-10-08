@@ -1,0 +1,85 @@
+/**
+ * LumaBorder - Ambient Light Glow Stilleri
+ * Video etrafındaki ışık halesi ve YouTube yerleşimi
+ */
+
+.lumaborder-ambient-container {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+  overflow: visible !important;
+  display: block;
+}
+
+.lumaborder-canvas {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: fill !important;
+  pointer-events: none !important;
+  border-radius: 12px;
+  
+  /* GPU Donanım Hızlandırma */
+  transform: scale(var(--lumaborder-scale, 1.25)) translateZ(0);
+  filter: blur(var(--lumaborder-blur, 45px))
+          brightness(var(--lumaborder-brightness, 1))
+          contrast(var(--lumaborder-contrast, 1.05))
+          saturate(var(--lumaborder-saturate, 1.2));
+  
+  opacity: 0.95;
+  transition: filter var(--lumaborder-transition, 0.15s) ease-out,
+              transform var(--lumaborder-transition, 0.15s) ease-out;
+  will-change: transform, filter;
+}
+
+/* YouTube Video Player taşma ayarları */
+#player-container.ytd-watch-flexy,
+#player-container.ytd-watch-grid,
+#player.ytd-watch-flexy,
+#ytd-player,
+.html5-video-player {
+  overflow: visible !important;
+}
+
+/* Videonun kendisinin ambiansın üstünde kalmasını sağla */
+.html5-main-video {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* YouTube Video Kontrol Çubuğu buton stili */
+.ytp-button.lumaborder-player-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s ease, filter 0.2s ease;
+  vertical-align: top;
+  width: 48px;
+  height: 100%;
+}
+
+.ytp-button.lumaborder-player-btn svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+  filter: drop-shadow(0 0 2px rgba(255, 140, 0, 0.5));
+  transition: all 0.25s ease;
+}
+
+.ytp-button.lumaborder-player-btn:hover svg {
+  transform: scale(1.15);
+  filter: drop-shadow(0 0 6px #ff7700) drop-shadow(0 0 12px #ff4500);
+}
+
+.ytp-button.lumaborder-player-btn.active svg {
+  fill: #ff9100;
+  filter: drop-shadow(0 0 8px #ff7b00);
+}
