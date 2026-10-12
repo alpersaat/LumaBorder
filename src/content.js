@@ -469,8 +469,7 @@
       this.bindEvents();
     }
     initDOM() {
-      const old = this.player.querySelector(".lumaborder-ambient-container");
-      if (old) old.remove();
+      document.querySelectorAll(".lumaborder-ambient-container").forEach((el) => el.remove());
       this.container = document.createElement("div");
       this.container.className = "lumaborder-ambient-container";
       this.container.setAttribute("aria-hidden", "true");
@@ -500,9 +499,11 @@
         desynchronized: true,
         willReadFrequently: false
       });
+      const aW = this.isShorts ? 18 : 32;
+      const aH = this.isShorts ? 32 : 18;
       if (typeof OffscreenCanvas !== "undefined") {
         try {
-          this.analysisCanvas = new OffscreenCanvas(32, 18);
+          this.analysisCanvas = new OffscreenCanvas(aW, aH);
           this.analysisCtx = this.analysisCanvas.getContext("2d", { willReadFrequently: true });
         } catch (e) {
           this.analysisCanvas = null;
@@ -510,8 +511,8 @@
       }
       if (!this.analysisCanvas) {
         this.analysisCanvas = document.createElement("canvas");
-        this.analysisCanvas.width = 32;
-        this.analysisCanvas.height = 18;
+        this.analysisCanvas.width = aW;
+        this.analysisCanvas.height = aH;
         this.analysisCtx = this.analysisCanvas.getContext("2d", {
           willReadFrequently: true
         });
@@ -588,7 +589,15 @@
         }
       }
     }
+    unbindVideoEvents() {
+      if (this.video) {
+        if (this.onPlay) this.video.removeEventListener("play", this.onPlay);
+        if (this.onPause) this.video.removeEventListener("pause", this.onPause);
+        if (this.onEnded) this.video.removeEventListener("ended", this.onEnded);
+      }
+    }
     bindEvents() {
+      this.unbindVideoEvents();
       this.onPlay = () => this.start();
       this.onPause = () => {
         if (this.settings.biasLightingMode === "pause") {
@@ -630,17 +639,30 @@
       const contrast = (this.settings.contrast / 100).toFixed(2);
       const saturate = (this.settings.saturation / 100).toFixed(2);
       const blur = Math.max(10, this.settings.blur);
-      let spreadMultiplier = 1 + this.settings.spread / 100;
+      let scaleX, scaleY, tightScaleX, tightScaleY;
       if (this.isShorts) {
-        spreadMultiplier = Math.max(1.35, spreadMultiplier * 1.25);
+        const spreadRatio = this.settings.spread / 100;
+        scaleX = (1.3 + spreadRatio * 0.4).toFixed(2);
+        scaleY = (1.02 + spreadRatio * 0.05).toFixed(2);
+        tightScaleX = (1.1 + spreadRatio * 0.15).toFixed(2);
+        tightScaleY = (1.01 + spreadRatio * 0.02).toFixed(2);
+      } else {
+        const spreadMultiplier = 1 + this.settings.spread / 100;
+        scaleX = spreadMultiplier.toFixed(2);
+        scaleY = spreadMultiplier.toFixed(2);
+        const tightScale = Math.min(1.15, 1 + this.settings.spread / 400).toFixed(2);
+        tightScaleX = tightScale;
+        tightScaleY = tightScale;
       }
-      const spreadScale = spreadMultiplier.toFixed(2);
-      const tightScale = Math.min(1.15, 1 + this.settings.spread / 400).toFixed(2);
       const tightBlur = Math.max(8, Math.round(blur * 0.35));
       const smoothingSec = this.settings.smoothing / 100 * 0.25;
       this.container.style.setProperty("--lumaborder-blur", `${blur}px`);
-      this.container.style.setProperty("--lumaborder-scale", `${spreadScale}`);
-      this.container.style.setProperty("--lumaborder-tight-scale", `${tightScale}`);
+      this.container.style.setProperty("--lumaborder-scale", scaleX);
+      this.container.style.setProperty("--lumaborder-scale-x", scaleX);
+      this.container.style.setProperty("--lumaborder-scale-y", scaleY);
+      this.container.style.setProperty("--lumaborder-tight-scale", tightScaleX);
+      this.container.style.setProperty("--lumaborder-tight-scale-x", tightScaleX);
+      this.container.style.setProperty("--lumaborder-tight-scale-y", tightScaleY);
       this.container.style.setProperty("--lumaborder-tight-blur", `${tightBlur}px`);
       this.container.style.setProperty("--lumaborder-brightness", brightness);
       this.container.style.setProperty("--lumaborder-contrast", contrast);
@@ -744,7 +766,9 @@
       this.lastAnalysisTime = now;
       if (this.settings.workerRender && this.worker && this.isWorkerReady && !this.isAnalyzingInWorker && typeof createImageBitmap === "function") {
         this.isAnalyzingInWorker = true;
-        createImageBitmap(this.video, { resizeWidth: 32, resizeHeight: 18, resizeQuality: "low" }).then((bitmap) => {
+        const resizeW = this.isShorts ? 18 : 32;
+        const resizeH = this.isShorts ? 32 : 18;
+        createImageBitmap(this.video, { resizeWidth: resizeW, resizeHeight: resizeH, resizeQuality: "low" }).then((bitmap) => {
           this.worker.postMessage({
             type: "ANALYZE_PIXELS",
             data: {
@@ -877,8 +901,53 @@
       } catch (err) {
       }
     }
+    updateTarget(videoElem, playerElem) {
+      if (this.video === videoElem && this.player === playerElem && this.container?.isConnected) {
+        return;
+      }
+      this.stop();
+      this.unbindVideoEvents();
+      this.video = videoElem;
+      this.player = playerElem;
+      this.isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player.closest("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
+      this.canvasWidth = this.isShorts ? 108 : 192;
+      this.canvasHeight = this.isShorts ? 192 : 108;
+      if (this.canvasDiffuse) {
+        this.canvasDiffuse.width = this.canvasWidth;
+        this.canvasDiffuse.height = this.canvasHeight;
+      }
+      if (this.canvasTight) {
+        this.canvasTight.width = this.canvasWidth;
+        this.canvasTight.height = this.canvasHeight;
+      }
+      const aW = this.isShorts ? 18 : 32;
+      const aH = this.isShorts ? 32 : 18;
+      if (this.analysisCanvas) {
+        this.analysisCanvas.width = aW;
+        this.analysisCanvas.height = aH;
+      }
+      if (this.container && this.player) {
+        if (this.player.firstChild) {
+          this.player.insertBefore(this.container, this.player.firstChild);
+        } else {
+          this.player.appendChild(this.container);
+        }
+      }
+      document.querySelectorAll(".lumaborder-ambient-container").forEach((el) => {
+        if (el !== this.container) el.remove();
+      });
+      this.applySettings(this.settings);
+      this.bindEvents();
+      if (!this.video.paused && !this.video.ended && this.video.readyState >= 2) {
+        this.start();
+      }
+    }
     destroy() {
       this.stop();
+      this.unbindVideoEvents();
+      if (this.onVisibilityChange) {
+        document.removeEventListener("visibilitychange", this.onVisibilityChange);
+      }
       if (this.worker) {
         try {
           this.worker.terminate();
@@ -896,12 +965,6 @@
         this.batteryUpdateHandler = null;
       }
       this.batteryCallbacks.clear();
-      if (this.video) {
-        this.video.removeEventListener("play", this.onPlay);
-        this.video.removeEventListener("pause", this.onPause);
-        this.video.removeEventListener("ended", this.onEnded);
-      }
-      document.removeEventListener("visibilitychange", this.onVisibilityChange);
       if (this.container) {
         this.container.remove();
         this.container = null;
@@ -944,7 +1007,29 @@
     resolveControlsTarget() {
       const isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player?.closest?.("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
       if (isShorts) {
-        const activeReel = this.player?.closest?.("ytd-reel-video-renderer") || document.querySelector("ytd-reel-video-renderer[is-active]") || document.querySelector("ytd-reel-video-renderer");
+        let activeReel = this.player?.closest?.("ytd-reel-video-renderer") || document.querySelector("ytd-reel-video-renderer[is-active]");
+        if (!activeReel) {
+          const videos = Array.from(document.querySelectorAll("ytd-reel-video-renderer video"));
+          const playingVideo = videos.find((v) => !v.paused && v.readyState >= 2) || videos.find((v) => !v.paused);
+          if (playingVideo) {
+            activeReel = playingVideo.closest("ytd-reel-video-renderer");
+          }
+        }
+        if (!activeReel) {
+          const reels = Array.from(document.querySelectorAll("ytd-reel-video-renderer"));
+          if (reels.length > 0) {
+            const centerY = window.innerHeight / 2;
+            let minDistance = Infinity;
+            for (const r of reels) {
+              const rect = r.getBoundingClientRect();
+              const dist = Math.abs(rect.top + rect.height / 2 - centerY);
+              if (dist < minDistance) {
+                minDistance = dist;
+                activeReel = r;
+              }
+            }
+          }
+        }
         const shortsSelectors = [
           "#actions",
           "ytd-reel-player-overlay-renderer #actions",
@@ -1191,8 +1276,14 @@
       this.menuOverlay.addEventListener("mousedown", (e) => e.stopPropagation());
       this.menuOverlay.addEventListener("keydown", (e) => e.stopPropagation());
       this.menuOverlay.addEventListener("keyup", (e) => e.stopPropagation());
-      const targetContainer = this.player || document.querySelector("#movie_player") || document.body;
-      targetContainer.appendChild(this.menuOverlay);
+      const isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player?.closest?.("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
+      if (isShorts) {
+        this.menuOverlay.classList.add("lumaborder-shorts-menu");
+        document.body.appendChild(this.menuOverlay);
+      } else {
+        const targetContainer = this.player || document.querySelector("#movie_player") || document.body;
+        targetContainer.appendChild(this.menuOverlay);
+      }
       this.bindMenuEvents();
     }
     getTabContentHTML(tab) {
@@ -1624,6 +1715,26 @@
         tag.className = "lumaborder-battery-tag normal";
       }
     }
+    updateTarget(playerElem, ambientEngine) {
+      if (this.player && this.onPlayerHover) {
+        this.player.removeEventListener("mouseenter", this.onPlayerHover);
+        this.player.removeEventListener("mousemove", this.onPlayerHover);
+      }
+      this.player = playerElem;
+      this.ambientEngine = ambientEngine;
+      if (this.player && this.onPlayerHover) {
+        this.player.addEventListener("mouseenter", this.onPlayerHover, { passive: true });
+        this.player.addEventListener("mousemove", this.onPlayerHover, { passive: true });
+      }
+      this.mountButton();
+      if (this.isOpen && this.menuOverlay) {
+        const isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player?.closest?.("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
+        this.menuOverlay.classList.toggle("lumaborder-shorts-menu", isShorts);
+        if (this.activeTab === "performance") {
+          this.updateBatteryCard(this.ambientEngine?.batteryInfo);
+        }
+      }
+    }
     destroy() {
       this.closeMenu();
       if (this.mountRetryTimeout) {
@@ -1689,14 +1800,40 @@
         }
       }
       bindEvents() {
-        window.addEventListener("yt-navigate-finish", () => this.scheduleBootstrap());
-        window.addEventListener("spfdone", () => this.scheduleBootstrap());
-        window.addEventListener("popstate", () => this.scheduleBootstrap());
+        window.addEventListener("yt-navigate-finish", () => this.scheduleBootstrap(150));
+        window.addEventListener("spfdone", () => this.scheduleBootstrap(150));
+        window.addEventListener("popstate", () => this.scheduleBootstrap(150));
         window.addEventListener("wheel", () => {
           if (location.pathname.startsWith("/shorts")) {
-            this.scheduleBootstrap(200);
+            this.scheduleBootstrap(100);
           }
         }, { passive: true });
+        window.addEventListener("keydown", (e) => {
+          if (location.pathname.startsWith("/shorts") && ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "j", "k"].includes(e.key)) {
+            this.scheduleBootstrap(100);
+          }
+        }, { passive: true });
+        window.addEventListener("click", (e) => {
+          if (location.pathname.startsWith("/shorts")) {
+            if (e.target && e.target.closest && e.target.closest("#navigation-button-down, #navigation-button-up, ytd-reel-video-renderer")) {
+              this.scheduleBootstrap(100);
+            }
+          }
+        }, { passive: true });
+        document.addEventListener("play", (e) => {
+          if (location.pathname.startsWith("/shorts") && e.target && e.target.tagName === "VIDEO") {
+            this.handleShortsVideoPlay(e.target);
+          }
+        }, true);
+      }
+      handleShortsVideoPlay(video) {
+        if (!video) return;
+        const activeReel = video.closest("ytd-reel-video-renderer");
+        const player = activeReel?.querySelector("#player-container") || activeReel?.querySelector(".player-container") || activeReel?.querySelector("#shorts-player") || video.parentElement;
+        if (video !== this.currentVideo || player !== this.currentPlayer || activeReel !== this.currentReel) {
+          this.currentReel = activeReel;
+          this.setup(video, player);
+        }
       }
       scheduleBootstrap(delay = 300) {
         if (this.initTimeout) clearTimeout(this.initTimeout);
@@ -1710,7 +1847,7 @@
               const activeReel = document.querySelector("ytd-reel-video-renderer[is-active]");
               const video = activeReel ? activeReel.querySelector("video") : document.querySelector("ytd-shorts video");
               if (video && (video !== this.currentVideo || activeReel !== this.currentReel)) {
-                this.scheduleBootstrap(150);
+                this.scheduleBootstrap(100);
               }
             } else {
               const video = document.querySelector("video.html5-main-video") || document.querySelector("video");
@@ -1740,24 +1877,36 @@
         let player = null;
         let activeReel = null;
         if (isShorts) {
-          const reelSelectors = [
-            "ytd-reel-video-renderer[is-active]",
-            "ytd-reel-video-renderer",
-            "ytd-shorts [is-active]",
-            "#shorts-player"
-          ];
-          for (const sel of reelSelectors) {
-            try {
-              const el = document.querySelector(sel);
-              if (el) {
-                activeReel = el;
-                break;
+          activeReel = document.querySelector("ytd-reel-video-renderer[is-active]");
+          if (!activeReel) {
+            const videos = Array.from(document.querySelectorAll("ytd-reel-video-renderer video"));
+            const playingVideo = videos.find((v) => !v.paused && v.readyState >= 2) || videos.find((v) => !v.paused);
+            if (playingVideo) {
+              activeReel = playingVideo.closest("ytd-reel-video-renderer");
+              video = playingVideo;
+            }
+          }
+          if (!activeReel) {
+            const reels = Array.from(document.querySelectorAll("ytd-reel-video-renderer"));
+            if (reels.length > 0) {
+              const centerY = window.innerHeight / 2;
+              let closestReel = null;
+              let minDistance = Infinity;
+              for (const r of reels) {
+                const rect = r.getBoundingClientRect();
+                const dist = Math.abs(rect.top + rect.height / 2 - centerY);
+                if (dist < minDistance) {
+                  minDistance = dist;
+                  closestReel = r;
+                }
               }
-            } catch (e) {
+              activeReel = closestReel;
             }
           }
           if (activeReel) {
-            video = activeReel.querySelector("video.html5-main-video") || activeReel.querySelector("video");
+            if (!video) {
+              video = activeReel.querySelector("video.html5-main-video") || activeReel.querySelector("video");
+            }
             player = activeReel.querySelector("#player-container") || activeReel.querySelector(".player-container") || activeReel.querySelector("#shorts-player") || activeReel;
           }
           if (!video) {
@@ -1832,7 +1981,7 @@
         if (!video || !player) {
           setTimeout(() => {
             this.retryBootstrap(isShorts);
-          }, 400);
+          }, 300);
           return;
         }
         if (this.currentVideo === video && this.currentPlayer === player && this.ambientEngine && (isShorts ? this.currentReel === activeReel : true)) {
@@ -1848,12 +1997,20 @@
         }
       }
       setup(video, player) {
-        this.teardown();
+        if (!video || !player) return;
         this.currentVideo = video;
         this.currentPlayer = player;
         try {
-          this.ambientEngine = new AmbientEngine(video, player, settingsManager.current);
-          this.playerUI = new PlayerUI(player, settingsManager, this.ambientEngine);
+          if (this.ambientEngine && this.playerUI) {
+            this.ambientEngine.updateTarget(video, player);
+            this.playerUI.updateTarget(player, this.ambientEngine);
+          } else {
+            this.teardown();
+            this.currentVideo = video;
+            this.currentPlayer = player;
+            this.ambientEngine = new AmbientEngine(video, player, settingsManager.current);
+            this.playerUI = new PlayerUI(player, settingsManager, this.ambientEngine);
+          }
         } catch (err) {
           console.warn("[LumaBorder] Kurulum hatas\u0131:", err);
         }

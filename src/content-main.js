@@ -47,16 +47,51 @@ import { PlayerUI } from './player-ui.js';
     }
 
     bindEvents() {
-      window.addEventListener('yt-navigate-finish', () => this.scheduleBootstrap());
-      window.addEventListener('spfdone', () => this.scheduleBootstrap());
-      window.addEventListener('popstate', () => this.scheduleBootstrap());
+      window.addEventListener('yt-navigate-finish', () => this.scheduleBootstrap(150));
+      window.addEventListener('spfdone', () => this.scheduleBootstrap(150));
+      window.addEventListener('popstate', () => this.scheduleBootstrap(150));
 
-      // Shorts video geçişleri için scroll dinleyicisi
+      // Shorts video geçişleri için scroll ve yön tuşları dinleyicileri
       window.addEventListener('wheel', () => {
         if (location.pathname.startsWith('/shorts')) {
-          this.scheduleBootstrap(200);
+          this.scheduleBootstrap(100);
         }
       }, { passive: true });
+
+      window.addEventListener('keydown', (e) => {
+        if (location.pathname.startsWith('/shorts') && ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'j', 'k'].includes(e.key)) {
+          this.scheduleBootstrap(100);
+        }
+      }, { passive: true });
+
+      window.addEventListener('click', (e) => {
+        if (location.pathname.startsWith('/shorts')) {
+          if (e.target && e.target.closest && e.target.closest('#navigation-button-down, #navigation-button-up, ytd-reel-video-renderer')) {
+            this.scheduleBootstrap(100);
+          }
+        }
+      }, { passive: true });
+
+      // Video oynatılmaya başlandığı an (Shorts geçişlerinde en kesin sinyal)
+      document.addEventListener('play', (e) => {
+        if (location.pathname.startsWith('/shorts') && e.target && e.target.tagName === 'VIDEO') {
+          this.handleShortsVideoPlay(e.target);
+        }
+      }, true);
+    }
+
+    handleShortsVideoPlay(video) {
+      if (!video) return;
+      const activeReel = video.closest('ytd-reel-video-renderer');
+      const player = activeReel?.querySelector('#player-container') ||
+                     activeReel?.querySelector('.player-container') ||
+                     activeReel?.querySelector('#shorts-player') ||
+                     video.parentElement;
+
+      if (video !== this.currentVideo || player !== this.currentPlayer || activeReel !== this.currentReel) {
+        this.currentReel = activeReel;
+        this.setup(video, player);
+      }
     }
 
     scheduleBootstrap(delay = 300) {
@@ -72,7 +107,7 @@ import { PlayerUI } from './player-ui.js';
             const activeReel = document.querySelector('ytd-reel-video-renderer[is-active]');
             const video = activeReel ? activeReel.querySelector('video') : document.querySelector('ytd-shorts video');
             if (video && (video !== this.currentVideo || activeReel !== this.currentReel)) {
-              this.scheduleBootstrap(150);
+              this.scheduleBootstrap(100);
             }
           } else {
             const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
@@ -105,26 +140,43 @@ import { PlayerUI } from './player-ui.js';
       let activeReel = null;
 
       if (isShorts) {
-        const reelSelectors = [
-          'ytd-reel-video-renderer[is-active]',
-          'ytd-reel-video-renderer',
-          'ytd-shorts [is-active]',
-          '#shorts-player'
-        ];
+        // 1. is-active özniteliğine sahip aktif reel
+        activeReel = document.querySelector('ytd-reel-video-renderer[is-active]');
 
-        for (const sel of reelSelectors) {
-          try {
-            const el = document.querySelector(sel);
-            if (el) {
-              activeReel = el;
-              break;
+        // 2. Bulunamazsa oynatılmakta olan videonun reel'i
+        if (!activeReel) {
+          const videos = Array.from(document.querySelectorAll('ytd-reel-video-renderer video'));
+          const playingVideo = videos.find(v => !v.paused && v.readyState >= 2) || videos.find(v => !v.paused);
+          if (playingVideo) {
+            activeReel = playingVideo.closest('ytd-reel-video-renderer');
+            video = playingVideo;
+          }
+        }
+
+        // 3. Bulunamazsa görünüm alanının merkezine en yakın reel
+        if (!activeReel) {
+          const reels = Array.from(document.querySelectorAll('ytd-reel-video-renderer'));
+          if (reels.length > 0) {
+            const centerY = window.innerHeight / 2;
+            let closestReel = null;
+            let minDistance = Infinity;
+            for (const r of reels) {
+              const rect = r.getBoundingClientRect();
+              const dist = Math.abs((rect.top + rect.height / 2) - centerY);
+              if (dist < minDistance) {
+                minDistance = dist;
+                closestReel = r;
+              }
             }
-          } catch (e) {}
+            activeReel = closestReel;
+          }
         }
 
         if (activeReel) {
-          video = activeReel.querySelector('video.html5-main-video') ||
-                  activeReel.querySelector('video');
+          if (!video) {
+            video = activeReel.querySelector('video.html5-main-video') ||
+                    activeReel.querySelector('video');
+          }
           player = activeReel.querySelector('#player-container') ||
                    activeReel.querySelector('.player-container') ||
                    activeReel.querySelector('#shorts-player') ||
@@ -215,7 +267,7 @@ import { PlayerUI } from './player-ui.js';
       if (!video || !player) {
         setTimeout(() => {
           this.retryBootstrap(isShorts);
-        }, 400);
+        }, 300);
         return;
       }
 
@@ -235,13 +287,23 @@ import { PlayerUI } from './player-ui.js';
     }
 
     setup(video, player) {
-      this.teardown();
+      if (!video || !player) return;
+
       this.currentVideo = video;
       this.currentPlayer = player;
 
       try {
-        this.ambientEngine = new AmbientEngine(video, player, settingsManager.current);
-        this.playerUI = new PlayerUI(player, settingsManager, this.ambientEngine);
+        if (this.ambientEngine && this.playerUI) {
+          // Varolan motoru ve arayüzü yeni videoya pürüzsüz taşı
+          this.ambientEngine.updateTarget(video, player);
+          this.playerUI.updateTarget(player, this.ambientEngine);
+        } else {
+          this.teardown();
+          this.currentVideo = video;
+          this.currentPlayer = player;
+          this.ambientEngine = new AmbientEngine(video, player, settingsManager.current);
+          this.playerUI = new PlayerUI(player, settingsManager, this.ambientEngine);
+        }
       } catch (err) {
         console.warn('[LumaBorder] Kurulum hatası:', err);
       }

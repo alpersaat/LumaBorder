@@ -31,7 +31,7 @@
 
 /* Katman 1: Geniş ve Puslu Diffuse Ambient Katmanı */
 .lumaborder-canvas-diffuse {
-  transform: scale(var(--lumaborder-scale, 1.25)) translateZ(0);
+  transform: scale(var(--lumaborder-scale-x, var(--lumaborder-scale, 1.25)), var(--lumaborder-scale-y, var(--lumaborder-scale, 1.25))) translateZ(0);
   filter: blur(var(--lumaborder-blur, 45px))
           brightness(var(--lumaborder-brightness, 1))
           contrast(var(--lumaborder-contrast, 1.05))
@@ -44,7 +44,7 @@
 
 /* Katman 2: Videonun Hemen Ardında Keskin & Canlı Tight Core Glow Katmanı */
 .lumaborder-canvas-tight {
-  transform: scale(var(--lumaborder-tight-scale, 1.07)) translateZ(0);
+  transform: scale(var(--lumaborder-tight-scale-x, var(--lumaborder-tight-scale, 1.07)), var(--lumaborder-tight-scale-y, var(--lumaborder-tight-scale, 1.07))) translateZ(0);
   filter: blur(var(--lumaborder-tight-blur, 16px))
           brightness(calc(var(--lumaborder-brightness, 1) * 1.15))
           contrast(calc(var(--lumaborder-contrast, 1.05) * 1.1))
@@ -64,25 +64,26 @@
   overflow: visible !important;
 }
 
-/* Videonun kendisinin ambiansın üstünde kalmasını sağla */
-.html5-main-video {
-  position: relative !important;
+/* Standart YouTube izleme sayfasında videonun ambiansın üstünde kalmasını sağla */
+ytd-watch-flexy video.html5-main-video,
+ytd-watch-grid video.html5-main-video {
   z-index: 1 !important;
 }
 
 /* YouTube Shorts Desteği & Taşma İzinleri */
-ytd-shorts,
-#shorts-container,
-ytd-reel-video-renderer,
-ytd-reel-video-renderer[is-active],
+/* NOT: ytd-shorts ve #shorts-container'a ASLA overflow: visible verilmez! Kaydırma (scroll/snap) YouTube tarafından yönetilir. */
 ytd-reel-video-renderer #player-container,
-ytd-reel-video-renderer .player-container,
-#shorts-player,
-.reel-video-in-sequence,
-.shorts-video-container {
+ytd-reel-video-renderer .player-container {
   overflow: visible !important;
 }
 
+/* Shorts oynatıcısını (video ve kontroller) ambiansın üstünde tut */
+ytd-reel-video-renderer #shorts-player {
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* Shorts reel içinde ambiansın en arkada kalmasını sağla */
 ytd-reel-video-renderer .lumaborder-ambient-container,
 #shorts-player .lumaborder-ambient-container {
   z-index: 0 !important;
@@ -127,26 +128,28 @@ ytd-reel-video-renderer #overlay {
   filter: drop-shadow(0 0 8px #ff7b00);
 }
 
-/* YouTube Shorts Kenar Menüsü Buton Stili */
+/* YouTube Shorts Kenar Menüsü Buton Stili (Kompakt ve Native Uyumlu) */
 .lumaborder-shorts-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   color: #fff;
   cursor: pointer;
-  margin-top: 12px;
+  margin: 6px 0;
   transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  flex-shrink: 0;
 }
 
 .lumaborder-shorts-btn svg {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   fill: #fff;
   filter: drop-shadow(0 0 3px rgba(255, 140, 0, 0.6));
   transition: all 0.25s ease;
@@ -154,8 +157,8 @@ ytd-reel-video-renderer #overlay {
 
 .lumaborder-shorts-btn:hover {
   transform: scale(1.12);
-  background: rgba(255, 140, 0, 0.28);
-  border-color: rgba(255, 140, 0, 0.6);
+  background: rgba(255, 140, 0, 0.32);
+  border-color: rgba(255, 140, 0, 0.65);
   box-shadow: 0 0 16px rgba(255, 140, 0, 0.5);
 }
 

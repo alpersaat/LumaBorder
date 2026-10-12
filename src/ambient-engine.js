@@ -54,9 +54,8 @@ export class AmbientEngine {
   }
 
   initDOM() {
-    // Varsa eski container'ı temizle
-    const old = this.player.querySelector('.lumaborder-ambient-container');
-    if (old) old.remove();
+    // Varsa tüm eski/öksüz container'ları temizle (Shorts reels geçişleri dahil)
+    document.querySelectorAll('.lumaborder-ambient-container').forEach(el => el.remove());
 
     this.container = document.createElement('div');
     this.container.className = 'lumaborder-ambient-container';
@@ -97,10 +96,12 @@ export class AmbientEngine {
       willReadFrequently: false
     });
 
-    // Letterbox & Pillarbox analiz tuvali (OffscreenCanvas öncelikli)
+    // Letterbox & Pillarbox analiz tuvali (Shorts için 9:16 = 18x32, Standart için 16:9 = 32x18)
+    const aW = this.isShorts ? 18 : 32;
+    const aH = this.isShorts ? 32 : 18;
     if (typeof OffscreenCanvas !== 'undefined') {
       try {
-        this.analysisCanvas = new OffscreenCanvas(32, 18);
+        this.analysisCanvas = new OffscreenCanvas(aW, aH);
         this.analysisCtx = this.analysisCanvas.getContext('2d', { willReadFrequently: true });
       } catch (e) {
         this.analysisCanvas = null;
@@ -108,8 +109,8 @@ export class AmbientEngine {
     }
     if (!this.analysisCanvas) {
       this.analysisCanvas = document.createElement('canvas');
-      this.analysisCanvas.width = 32;
-      this.analysisCanvas.height = 18;
+      this.analysisCanvas.width = aW;
+      this.analysisCanvas.height = aH;
       this.analysisCtx = this.analysisCanvas.getContext('2d', {
         willReadFrequently: true
       });
@@ -192,7 +193,17 @@ export class AmbientEngine {
     }
   }
 
+  unbindVideoEvents() {
+    if (this.video) {
+      if (this.onPlay) this.video.removeEventListener('play', this.onPlay);
+      if (this.onPause) this.video.removeEventListener('pause', this.onPause);
+      if (this.onEnded) this.video.removeEventListener('ended', this.onEnded);
+    }
+  }
+
   bindEvents() {
+    this.unbindVideoEvents();
+
     this.onPlay = () => this.start();
     this.onPause = () => {
       if (this.settings.biasLightingMode === 'pause') {
@@ -244,20 +255,35 @@ export class AmbientEngine {
     const saturate = (this.settings.saturation / 100).toFixed(2);
     const blur = Math.max(10, this.settings.blur);
     
-    // Shorts için genişleme çarpanını optimize et (yan siyah boşlukları doldurması için)
-    let spreadMultiplier = 1 + (this.settings.spread / 100);
+    let scaleX, scaleY, tightScaleX, tightScaleY;
     if (this.isShorts) {
-      spreadMultiplier = Math.max(1.35, spreadMultiplier * 1.25);
+      // Shorts için: dikey videonun sağ ve solundaki geniş siyah alanları doldurmak üzere yatayda geniş,
+      // dikeyde ise üst/alt UI ve komşu videolara taşmaması için kontrollü dar ölçekleme
+      const spreadRatio = this.settings.spread / 100;
+      scaleX = (1.30 + (spreadRatio * 0.40)).toFixed(2);
+      scaleY = (1.02 + (spreadRatio * 0.05)).toFixed(2);
+      tightScaleX = (1.10 + (spreadRatio * 0.15)).toFixed(2);
+      tightScaleY = (1.01 + (spreadRatio * 0.02)).toFixed(2);
+    } else {
+      const spreadMultiplier = 1 + (this.settings.spread / 100);
+      scaleX = spreadMultiplier.toFixed(2);
+      scaleY = spreadMultiplier.toFixed(2);
+      const tightScale = Math.min(1.15, 1 + (this.settings.spread / 400)).toFixed(2);
+      tightScaleX = tightScale;
+      tightScaleY = tightScale;
     }
-    const spreadScale = spreadMultiplier.toFixed(2);
-    const tightScale = Math.min(1.15, 1 + (this.settings.spread / 400)).toFixed(2);
+
     const tightBlur = Math.max(8, Math.round(blur * 0.35));
     const smoothingSec = (this.settings.smoothing / 100) * 0.25;
 
     // CSS Değişkenleri üzerinden GPU hızlandırmalı filtre ve dönüşümler
     this.container.style.setProperty('--lumaborder-blur', `${blur}px`);
-    this.container.style.setProperty('--lumaborder-scale', `${spreadScale}`);
-    this.container.style.setProperty('--lumaborder-tight-scale', `${tightScale}`);
+    this.container.style.setProperty('--lumaborder-scale', scaleX);
+    this.container.style.setProperty('--lumaborder-scale-x', scaleX);
+    this.container.style.setProperty('--lumaborder-scale-y', scaleY);
+    this.container.style.setProperty('--lumaborder-tight-scale', tightScaleX);
+    this.container.style.setProperty('--lumaborder-tight-scale-x', tightScaleX);
+    this.container.style.setProperty('--lumaborder-tight-scale-y', tightScaleY);
     this.container.style.setProperty('--lumaborder-tight-blur', `${tightBlur}px`);
     this.container.style.setProperty('--lumaborder-brightness', brightness);
     this.container.style.setProperty('--lumaborder-contrast', contrast);
@@ -390,7 +416,9 @@ export class AmbientEngine {
     // Worker Render / Analiz Denemesi
     if (this.settings.workerRender && this.worker && this.isWorkerReady && !this.isAnalyzingInWorker && typeof createImageBitmap === 'function') {
       this.isAnalyzingInWorker = true;
-      createImageBitmap(this.video, { resizeWidth: 32, resizeHeight: 18, resizeQuality: 'low' })
+      const resizeW = this.isShorts ? 18 : 32;
+      const resizeH = this.isShorts ? 32 : 18;
+      createImageBitmap(this.video, { resizeWidth: resizeW, resizeHeight: resizeH, resizeQuality: 'low' })
         .then((bitmap) => {
           this.worker.postMessage({
             type: 'ANALYZE_PIXELS',
@@ -532,8 +560,67 @@ export class AmbientEngine {
     } catch (err) {}
   }
 
+  updateTarget(videoElem, playerElem) {
+    if (this.video === videoElem && this.player === playerElem && this.container?.isConnected) {
+      return;
+    }
+
+    this.stop();
+    this.unbindVideoEvents();
+
+    this.video = videoElem;
+    this.player = playerElem;
+
+    this.isShorts = location.pathname.startsWith('/shorts') ||
+      Boolean(this.player.closest('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
+
+    this.canvasWidth = this.isShorts ? 108 : 192;
+    this.canvasHeight = this.isShorts ? 192 : 108;
+
+    if (this.canvasDiffuse) {
+      this.canvasDiffuse.width = this.canvasWidth;
+      this.canvasDiffuse.height = this.canvasHeight;
+    }
+    if (this.canvasTight) {
+      this.canvasTight.width = this.canvasWidth;
+      this.canvasTight.height = this.canvasHeight;
+    }
+
+    const aW = this.isShorts ? 18 : 32;
+    const aH = this.isShorts ? 32 : 18;
+    if (this.analysisCanvas) {
+      this.analysisCanvas.width = aW;
+      this.analysisCanvas.height = aH;
+    }
+
+    // Container'ı yeni player'a taşı
+    if (this.container && this.player) {
+      if (this.player.firstChild) {
+        this.player.insertBefore(this.container, this.player.firstChild);
+      } else {
+        this.player.appendChild(this.container);
+      }
+    }
+
+    // Diğer tüm öksüz ambians konteynerlerini temizle
+    document.querySelectorAll('.lumaborder-ambient-container').forEach((el) => {
+      if (el !== this.container) el.remove();
+    });
+
+    this.applySettings(this.settings);
+    this.bindEvents();
+
+    if (!this.video.paused && !this.video.ended && this.video.readyState >= 2) {
+      this.start();
+    }
+  }
+
   destroy() {
     this.stop();
+    this.unbindVideoEvents();
+    if (this.onVisibilityChange) {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    }
     if (this.worker) {
       try {
         this.worker.terminate();
@@ -549,13 +636,6 @@ export class AmbientEngine {
       this.batteryUpdateHandler = null;
     }
     this.batteryCallbacks.clear();
-
-    if (this.video) {
-      this.video.removeEventListener('play', this.onPlay);
-      this.video.removeEventListener('pause', this.onPause);
-      this.video.removeEventListener('ended', this.onEnded);
-    }
-    document.removeEventListener('visibilitychange', this.onVisibilityChange);
 
     if (this.container) {
       this.container.remove();

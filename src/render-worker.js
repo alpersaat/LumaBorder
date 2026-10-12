@@ -67,9 +67,10 @@ self.onmessage = function (e) {
       if (!bitmap) return;
 
       let crop = { top: 0, bottom: 0, left: 0, right: 0 };
-      try {
-        if (!analysisCanvas) {
-          analysisCanvas = new OffscreenCanvas(32, 18);
+        const reqW = isShorts ? 18 : 32;
+        const reqH = isShorts ? 32 : 18;
+        if (!analysisCanvas || analysisCanvas.width !== reqW || analysisCanvas.height !== reqH) {
+          analysisCanvas = new OffscreenCanvas(reqW, reqH);
           analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
         }
         const w = analysisCanvas.width;

@@ -48,9 +48,32 @@ export class PlayerUI {
       Boolean(this.player?.closest?.('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
 
     if (isShorts) {
-      const activeReel = this.player?.closest?.('ytd-reel-video-renderer') ||
-        document.querySelector('ytd-reel-video-renderer[is-active]') ||
-        document.querySelector('ytd-reel-video-renderer');
+      let activeReel = this.player?.closest?.('ytd-reel-video-renderer') ||
+        document.querySelector('ytd-reel-video-renderer[is-active]');
+
+      if (!activeReel) {
+        const videos = Array.from(document.querySelectorAll('ytd-reel-video-renderer video'));
+        const playingVideo = videos.find(v => !v.paused && v.readyState >= 2) || videos.find(v => !v.paused);
+        if (playingVideo) {
+          activeReel = playingVideo.closest('ytd-reel-video-renderer');
+        }
+      }
+
+      if (!activeReel) {
+        const reels = Array.from(document.querySelectorAll('ytd-reel-video-renderer'));
+        if (reels.length > 0) {
+          const centerY = window.innerHeight / 2;
+          let minDistance = Infinity;
+          for (const r of reels) {
+            const rect = r.getBoundingClientRect();
+            const dist = Math.abs((rect.top + rect.height / 2) - centerY);
+            if (dist < minDistance) {
+              minDistance = dist;
+              activeReel = r;
+            }
+          }
+        }
+      }
 
       const shortsSelectors = [
         '#actions',
@@ -359,8 +382,16 @@ export class PlayerUI {
     this.menuOverlay.addEventListener('keydown', (e) => e.stopPropagation());
     this.menuOverlay.addEventListener('keyup', (e) => e.stopPropagation());
 
-    const targetContainer = this.player || document.querySelector('#movie_player') || document.body;
-    targetContainer.appendChild(this.menuOverlay);
+    const isShorts = location.pathname.startsWith('/shorts') ||
+      Boolean(this.player?.closest?.('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
+
+    if (isShorts) {
+      this.menuOverlay.classList.add('lumaborder-shorts-menu');
+      document.body.appendChild(this.menuOverlay);
+    } else {
+      const targetContainer = this.player || document.querySelector('#movie_player') || document.body;
+      targetContainer.appendChild(this.menuOverlay);
+    }
 
     this.bindMenuEvents();
   }
@@ -833,6 +864,32 @@ export class PlayerUI {
       sub.textContent = i18n.t('batteryEcoDisabledBadge');
       tag.textContent = `%${level} Pilde`;
       tag.className = 'lumaborder-battery-tag normal';
+    }
+  }
+
+  updateTarget(playerElem, ambientEngine) {
+    if (this.player && this.onPlayerHover) {
+      this.player.removeEventListener('mouseenter', this.onPlayerHover);
+      this.player.removeEventListener('mousemove', this.onPlayerHover);
+    }
+
+    this.player = playerElem;
+    this.ambientEngine = ambientEngine;
+
+    if (this.player && this.onPlayerHover) {
+      this.player.addEventListener('mouseenter', this.onPlayerHover, { passive: true });
+      this.player.addEventListener('mousemove', this.onPlayerHover, { passive: true });
+    }
+
+    this.mountButton();
+
+    if (this.isOpen && this.menuOverlay) {
+      const isShorts = location.pathname.startsWith('/shorts') ||
+        Boolean(this.player?.closest?.('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
+      this.menuOverlay.classList.toggle('lumaborder-shorts-menu', isShorts);
+      if (this.activeTab === 'performance') {
+        this.updateBatteryCard(this.ambientEngine?.batteryInfo);
+      }
     }
   }
 

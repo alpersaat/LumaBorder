@@ -538,3 +538,45 @@
   color: #777;
   letter-spacing: 0.5px;
 }
+
+/* ========================================================
+   YouTube Shorts Özel Menü Konumlandırması (HUD / Kenar Panel)
+   Shorts videosunu asla kapatmaz, videonun yanındaki boş alana yerleşir
+   ======================================================== */
+.lumaborder-menu-overlay.lumaborder-shorts-menu {
+  position: fixed !important;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translateY(-50%) !important;
+  z-index: 999999 !important;
+  max-height: 85vh;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85), 0 0 24px rgba(255, 115, 0, 0.2);
+}
+
+/* Geniş ve Standart Masaüstü Ekranlar (Shorts videosunun solundaki boş alana yerleşir) */
+@media (min-width: 1200px) {
+  .lumaborder-menu-overlay.lumaborder-shorts-menu {
+    left: max(24px, calc(50vw - 260px - 380px)) !important;
+    right: auto !important;
+  }
+}
+
+/* Orta Boy Ekranlar (Shorts videosunun sağına / butonların dışına yerleşir) */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .lumaborder-menu-overlay.lumaborder-shorts-menu {
+    right: max(16px, calc(50vw - 260px - 380px)) !important;
+    left: auto !important;
+  }
+}
+
+/* Küçük veya Dar Ekranlar (Altta kompakt HUD olarak yerleşir) */
+@media (max-width: 899px) {
+  .lumaborder-menu-overlay.lumaborder-shorts-menu {
+    top: auto !important;
+    bottom: 24px !important;
+    right: 50% !important;
+    transform: translateX(50%) !important;
+    width: min(360px, calc(100vw - 32px)) !important;
+  }
+}
+
