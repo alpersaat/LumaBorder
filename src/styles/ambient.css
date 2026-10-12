@@ -13,6 +13,8 @@
   z-index: 0 !important;
   overflow: visible !important;
   display: block;
+  -webkit-mask-image: var(--lumaborder-bottom-mask, none);
+  mask-image: var(--lumaborder-bottom-mask, none);
 }
 
 .lumaborder-canvas {
@@ -24,21 +26,36 @@
   object-fit: fill !important;
   pointer-events: none !important;
   border-radius: 12px;
-  
-  /* GPU Donanım Hızlandırma */
+  will-change: transform, filter;
+}
+
+/* Katman 1: Geniş ve Puslu Diffuse Ambient Katmanı */
+.lumaborder-canvas-diffuse {
   transform: scale(var(--lumaborder-scale, 1.25)) translateZ(0);
   filter: blur(var(--lumaborder-blur, 45px))
           brightness(var(--lumaborder-brightness, 1))
           contrast(var(--lumaborder-contrast, 1.05))
           saturate(var(--lumaborder-saturate, 1.2));
-  
-  opacity: 0.95;
+  opacity: 0.92;
+  z-index: 0;
   transition: filter var(--lumaborder-transition, 0.15s) ease-out,
               transform var(--lumaborder-transition, 0.15s) ease-out;
-  will-change: transform, filter;
 }
 
-/* YouTube Video Player taşma ayarları */
+/* Katman 2: Videonun Hemen Ardında Keskin & Canlı Tight Core Glow Katmanı */
+.lumaborder-canvas-tight {
+  transform: scale(var(--lumaborder-tight-scale, 1.07)) translateZ(0);
+  filter: blur(var(--lumaborder-tight-blur, 16px))
+          brightness(calc(var(--lumaborder-brightness, 1) * 1.15))
+          contrast(calc(var(--lumaborder-contrast, 1.05) * 1.1))
+          saturate(calc(var(--lumaborder-saturate, 1.2) * 1.25));
+  opacity: 0.98;
+  z-index: 1;
+  transition: filter var(--lumaborder-transition, 0.15s) ease-out,
+              transform var(--lumaborder-transition, 0.15s) ease-out;
+}
+
+/* YouTube Standart Video Player taşma ayarları */
 #player-container.ytd-watch-flexy,
 #player-container.ytd-watch-grid,
 #player.ytd-watch-flexy,
@@ -51,6 +68,32 @@
 .html5-main-video {
   position: relative !important;
   z-index: 1 !important;
+}
+
+/* YouTube Shorts Desteği & Taşma İzinleri */
+ytd-shorts,
+#shorts-container,
+ytd-reel-video-renderer,
+ytd-reel-video-renderer[is-active],
+ytd-reel-video-renderer #player-container,
+ytd-reel-video-renderer .player-container,
+#shorts-player,
+.reel-video-in-sequence,
+.shorts-video-container {
+  overflow: visible !important;
+}
+
+ytd-reel-video-renderer .lumaborder-ambient-container,
+#shorts-player .lumaborder-ambient-container {
+  z-index: 0 !important;
+}
+
+/* Shorts Butonları & Arayüz Katmanları Ambiansı Örtmesin/Engellemesin */
+ytd-reel-video-renderer #actions,
+ytd-reel-video-renderer .ytd-reel-player-overlay-renderer,
+ytd-reel-video-renderer #overlay {
+  position: relative !important;
+  z-index: 10 !important;
 }
 
 /* YouTube Video Kontrol Çubuğu buton stili */
@@ -80,6 +123,84 @@
 }
 
 .ytp-button.lumaborder-player-btn.active svg {
+  fill: #ff9100;
+  filter: drop-shadow(0 0 8px #ff7b00);
+}
+
+/* YouTube Shorts Kenar Menüsü Buton Stili */
+.lumaborder-shorts-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  margin-top: 12px;
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.lumaborder-shorts-btn svg {
+  width: 24px;
+  height: 24px;
+  fill: #fff;
+  filter: drop-shadow(0 0 3px rgba(255, 140, 0, 0.6));
+  transition: all 0.25s ease;
+}
+
+.lumaborder-shorts-btn:hover {
+  transform: scale(1.12);
+  background: rgba(255, 140, 0, 0.28);
+  border-color: rgba(255, 140, 0, 0.6);
+  box-shadow: 0 0 16px rgba(255, 140, 0, 0.5);
+}
+
+.lumaborder-shorts-btn.active svg {
+  fill: #ff9100;
+  filter: drop-shadow(0 0 8px #ff7b00);
+}
+
+/* YouTube A/B Test & DOM Değişikliklerine Karşı Yüzen (Floating HUD) Menü Butonu */
+.lumaborder-floating-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(15, 15, 22, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55), 0 0 12px rgba(255, 140, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 9999;
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.lumaborder-floating-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: #fff;
+  filter: drop-shadow(0 0 3px rgba(255, 140, 0, 0.5));
+  transition: all 0.25s ease;
+}
+
+.lumaborder-floating-btn:hover {
+  transform: scale(1.12);
+  background: rgba(255, 140, 0, 0.25);
+  border-color: rgba(255, 140, 0, 0.7);
+  box-shadow: 0 0 20px rgba(255, 140, 0, 0.5);
+}
+
+.lumaborder-floating-btn.active svg {
   fill: #ff9100;
   filter: drop-shadow(0 0 8px #ff7b00);
 }

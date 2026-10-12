@@ -12,7 +12,16 @@ export const PRESETS = {
     contrast: 105,
     smoothing: 60,
     letterboxDetection: true,
-    ecoMode: true
+    pillarboxDetection: true,
+    dualLayerGlow: true,
+    bottomFade: false,
+    bottomFadeStrength: 60,
+    biasLightingMode: 'off',
+    biasLightingColor: '#ffe4b5',
+    ecoMode: true,
+    targetFps: 'sync',
+    workerRender: true,
+    autoBatteryEco: true
   },
   cinema: {
     brightness: 85,
@@ -22,7 +31,16 @@ export const PRESETS = {
     contrast: 100,
     smoothing: 75,
     letterboxDetection: true,
-    ecoMode: true
+    pillarboxDetection: true,
+    dualLayerGlow: true,
+    bottomFade: true,
+    bottomFadeStrength: 65,
+    biasLightingMode: 'off',
+    biasLightingColor: '#ffe4b5',
+    ecoMode: true,
+    targetFps: 'sync',
+    workerRender: true,
+    autoBatteryEco: true
   },
   vibrant: {
     brightness: 130,
@@ -32,7 +50,16 @@ export const PRESETS = {
     contrast: 115,
     smoothing: 40,
     letterboxDetection: true,
-    ecoMode: false
+    pillarboxDetection: true,
+    dualLayerGlow: true,
+    bottomFade: false,
+    bottomFadeStrength: 60,
+    biasLightingMode: 'off',
+    biasLightingColor: '#ffe4b5',
+    ecoMode: false,
+    targetFps: 'sync',
+    workerRender: true,
+    autoBatteryEco: false
   },
   night: {
     brightness: 60,
@@ -42,7 +69,16 @@ export const PRESETS = {
     contrast: 90,
     smoothing: 80,
     letterboxDetection: true,
-    ecoMode: true
+    pillarboxDetection: true,
+    dualLayerGlow: false,
+    bottomFade: true,
+    bottomFadeStrength: 75,
+    biasLightingMode: 'pause',
+    biasLightingColor: '#ffe4b5',
+    ecoMode: true,
+    targetFps: 30,
+    workerRender: true,
+    autoBatteryEco: true
   },
   gaming: {
     brightness: 115,
@@ -52,7 +88,16 @@ export const PRESETS = {
     contrast: 110,
     smoothing: 25,
     letterboxDetection: true,
-    ecoMode: false
+    pillarboxDetection: true,
+    dualLayerGlow: true,
+    bottomFade: false,
+    bottomFadeStrength: 60,
+    biasLightingMode: 'off',
+    biasLightingColor: '#00e5ff',
+    ecoMode: false,
+    targetFps: 'sync',
+    workerRender: true,
+    autoBatteryEco: false
   }
 };
 
@@ -65,7 +110,16 @@ export const DEFAULT_SETTINGS = {
   contrast: 105,
   smoothing: 60,
   letterboxDetection: true,
+  pillarboxDetection: true,
+  dualLayerGlow: true,
+  bottomFade: false,
+  bottomFadeStrength: 60,
+  biasLightingMode: 'off',
+  biasLightingColor: '#ffe4b5',
   ecoMode: true,
+  targetFps: 'sync',
+  workerRender: true,
+  autoBatteryEco: true,
   theaterModeSync: true,
   fullScreenSync: true,
   activePreset: 'default',

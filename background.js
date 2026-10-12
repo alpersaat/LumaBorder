@@ -15,7 +15,16 @@ chrome.runtime.onInstalled.addListener(() => {
         contrast: 105,
         smoothing: 60,
         letterboxDetection: true,
+        pillarboxDetection: true,
+        dualLayerGlow: true,
+        bottomFade: false,
+        bottomFadeStrength: 60,
+        biasLightingMode: 'off',
+        biasLightingColor: '#ffe4b5',
         ecoMode: true,
+        targetFps: 'sync',
+        workerRender: true,
+        autoBatteryEco: true,
         activePreset: 'default',
         language: 'tr'
       });

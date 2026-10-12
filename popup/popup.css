@@ -15,7 +15,10 @@ body {
   color: #f3f4f6;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   user-select: none;
-  overflow: hidden;
+  max-height: 580px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
 
 .popup-container {
@@ -296,14 +299,160 @@ body {
   box-shadow: 0 0 10px rgba(255, 140, 0, 1);
 }
 
+/* Bias Lighting Row */
+.bias-modes-row {
+  display: flex;
+  gap: 6px;
+}
+
+/* FPS Modes Row */
+.fps-modes-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.fps-mode-btn {
+  flex: 1;
+  padding: 6px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.fps-mode-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.fps-mode-btn.active {
+  color: #ff9d2e;
+  background: rgba(255, 140, 0, 0.16);
+  border-color: #ff8c00;
+  box-shadow: 0 0 8px rgba(255, 140, 0, 0.25);
+}
+
+/* Popup Battery Badge */
+.popup-battery-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #cbd5e1;
+  margin-top: 4px;
+}
+
+.popup-battery-badge.eco-active {
+  border-color: rgba(255, 77, 77, 0.4);
+  background: rgba(255, 77, 77, 0.1);
+  color: #ff7878;
+}
+
+.popup-battery-badge.charging {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+}
+
+.bias-mode-btn {
+  flex: 1;
+  padding: 6px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.bias-mode-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.bias-mode-btn.active {
+  background: rgba(255, 120, 0, 0.18);
+  border-color: #ff8c00;
+  color: #ff9d2e;
+  box-shadow: 0 0 10px rgba(255, 140, 0, 0.25);
+}
+
+.bias-palette-row {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.color-dots-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.color-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s;
+  padding: 0;
+}
+
+.color-dot:hover {
+  transform: scale(1.2);
+}
+
+.color-dot.active {
+  border-color: #fff;
+  transform: scale(1.15);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+.popup-picker {
+  -webkit-appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  background: transparent;
+  padding: 0;
+  overflow: hidden;
+}
+
+.popup-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.popup-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
 /* Toggles Grid */
 .toggles-grid {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 10px 12px;
 }
 
 .check-item {

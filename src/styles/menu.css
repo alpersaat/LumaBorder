@@ -52,6 +52,7 @@
   font-size: 15px;
   letter-spacing: 0.2px;
   background: linear-gradient(135deg, #ff8c00 0%, #ff4500 100%);
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -325,8 +326,184 @@
   box-shadow: 0 0 12px rgba(255, 140, 0, 0.25);
 }
 
-.lumaborder-preset-icon {
+/* Ayırıcı Çizgi */
+.lumaborder-section-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 14px 0 10px 0;
+}
+
+/* Bias Lighting Mod Seçimi & FPS Modları */
+.lumaborder-bias-modes,
+.lumaborder-fps-modes {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.lumaborder-hint-text {
+  font-size: 10.5px;
+  color: #888;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+/* Canlı Pil Durumu Kartı */
+.lumaborder-battery-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  margin-bottom: 12px;
+}
+
+.lumaborder-battery-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lumaborder-battery-icon {
   font-size: 18px;
+}
+
+.lumaborder-battery-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lumaborder-battery-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #eee;
+}
+
+.lumaborder-battery-sub {
+  font-size: 10.5px;
+  color: #888;
+}
+
+.lumaborder-battery-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #aaa;
+}
+
+.lumaborder-battery-tag.eco {
+  background: rgba(255, 77, 77, 0.2);
+  color: #ff6b6b;
+  border: 1px solid rgba(255, 77, 77, 0.4);
+}
+
+.lumaborder-battery-tag.charging {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.lumaborder-battery-tag.normal {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.lumaborder-battery-tag.desktop {
+  background: rgba(255, 255, 255, 0.08);
+  color: #bbb;
+}
+
+.lumaborder-mode-pill {
+  flex: 1;
+  padding: 6px 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #aaa;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.lumaborder-mode-pill:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lumaborder-mode-pill.active {
+  color: #ff9d2e;
+  background: rgba(255, 140, 0, 0.18);
+  border-color: #ff8c00;
+  box-shadow: 0 0 10px rgba(255, 140, 0, 0.25);
+}
+
+/* Bias Lighting Renk Paleti */
+.lumaborder-color-palette {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-top: 6px;
+}
+
+.lumaborder-color-dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lumaborder-color-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+  padding: 0;
+}
+
+.lumaborder-color-dot:hover {
+  transform: scale(1.2);
+}
+
+.lumaborder-color-dot.active {
+  border-color: #fff;
+  transform: scale(1.15);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+}
+
+.lumaborder-color-picker {
+  -webkit-appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  background: transparent;
+  padding: 0;
+  overflow: hidden;
+}
+
+.lumaborder-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.lumaborder-color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
 }
 
 /* Alt Bar */

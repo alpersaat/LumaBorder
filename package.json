@@ -1,0 +1,23 @@
+{
+  "name": "lumaborder",
+  "version": "2.2.0",
+  "description": "YouTube için dinamik ve sinematik ortam ışığı (ambient light) uzantısı",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "dev": "node scripts/build.js --watch",
+    "watch": "node scripts/build.js --watch",
+    "package": "node scripts/package.js"
+  },
+  "keywords": [
+    "youtube",
+    "ambient-light",
+    "glow",
+    "chrome-extension"
+  ],
+  "author": "Alper",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

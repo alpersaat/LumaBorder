@@ -1,6 +1,6 @@
 /**
  * Ambition - Popup Controller
- * Hızlı ayar paneli, anlık önizleme ve dil yönetimi
+ * Hızlı ayar paneli, anlık sekme senkronizasyonu ve dil yönetimi
  */
 
 import { settingsManager } from '../src/settings.js';
@@ -18,6 +18,7 @@ class PopupController {
     this.updateLanguageUI();
     this.renderSettingsValues();
     this.bindEvents();
+    this.initBatteryListener();
     this.checkActiveTab();
   }
 
@@ -35,10 +36,23 @@ class PopupController {
       valBlur: document.getElementById('val-blur'),
       rngSaturation: document.getElementById('rng-saturation'),
       valSaturation: document.getElementById('val-saturation'),
+      chkDualLayer: document.getElementById('chk-duallayer'),
+      chkBottomFade: document.getElementById('chk-bottomfade'),
       chkLetterbox: document.getElementById('chk-letterbox'),
+      chkPillarbox: document.getElementById('chk-pillarbox'),
       chkEco: document.getElementById('chk-eco'),
+      chkBatteryEco: document.getElementById('chk-battery-eco'),
+      chkWorker: document.getElementById('chk-worker'),
       btnReset: document.getElementById('btn-reset'),
-      presetButtons: document.querySelectorAll('.preset-pill')
+      presetButtons: document.querySelectorAll('.preset-pill'),
+      biasModeButtons: document.querySelectorAll('.bias-mode-btn'),
+      biasPaletteRow: document.getElementById('popup-bias-palette'),
+      colorDots: document.querySelectorAll('.color-dot'),
+      colorPicker: document.getElementById('popup-color-picker'),
+      fpsButtons: document.querySelectorAll('.fps-mode-btn'),
+      batteryBadge: document.getElementById('popup-battery-badge'),
+      batteryIcon: document.getElementById('popup-battery-icon'),
+      batteryText: document.getElementById('popup-battery-text')
     };
   }
 
@@ -55,7 +69,24 @@ class PopupController {
       if (el) el.textContent = trans[key];
     }
 
+    // Bias modu buton çevirileri
+    const btnBiasOff = document.getElementById('btn-bias-off');
+    const btnBiasPause = document.getElementById('btn-bias-pause');
+    const btnBiasAlways = document.getElementById('btn-bias-always');
+    if (btnBiasOff) btnBiasOff.textContent = i18n.t('biasModeOff');
+    if (btnBiasPause) btnBiasPause.textContent = i18n.t('biasModePause');
+    if (btnBiasAlways) btnBiasAlways.textContent = i18n.t('biasModeAlways');
+
+    // FPS buton çevirileri
+    const btnFpsSync = document.getElementById('btn-fps-sync');
+    const btnFps60 = document.getElementById('btn-fps-60');
+    const btnFps30 = document.getElementById('btn-fps-30');
+    if (btnFpsSync) btnFpsSync.textContent = i18n.t('fpsSync');
+    if (btnFps60) btnFps60.textContent = i18n.t('fps60');
+    if (btnFps30) btnFps30.textContent = i18n.t('fps30');
+
     this.updateStatusText();
+    this.updateBatteryUI();
   }
 
   updateStatusText() {
@@ -83,10 +114,43 @@ class PopupController {
     this.elements.rngSaturation.value = s.saturation;
     this.elements.valSaturation.textContent = `${s.saturation}%`;
 
-    this.elements.chkLetterbox.checked = s.letterboxDetection;
-    this.elements.chkEco.checked = s.ecoMode;
+    if (this.elements.chkDualLayer) this.elements.chkDualLayer.checked = s.dualLayerGlow;
+    if (this.elements.chkBottomFade) this.elements.chkBottomFade.checked = s.bottomFade;
+    if (this.elements.chkLetterbox) this.elements.chkLetterbox.checked = s.letterboxDetection;
+    if (this.elements.chkPillarbox) this.elements.chkPillarbox.checked = s.pillarboxDetection;
+    if (this.elements.chkEco) this.elements.chkEco.checked = s.ecoMode;
+    if (this.elements.chkBatteryEco) this.elements.chkBatteryEco.checked = s.autoBatteryEco;
+    if (this.elements.chkWorker) this.elements.chkWorker.checked = s.workerRender;
+
+    // FPS Modu
+    this.updateFpsModeUI(s.targetFps || 'sync');
+
+    // Bias Lighting Mode
+    this.updateBiasModeUI(s.biasLightingMode || 'off');
+
+    // Bias Color
+    const color = s.biasLightingColor || '#ffe4b5';
+    if (this.elements.colorPicker) this.elements.colorPicker.value = color;
+    this.elements.colorDots.forEach(dot => {
+      dot.classList.toggle('active', dot.dataset.color === color);
+    });
 
     this.updateActivePresetPill(s.activePreset);
+  }
+
+  updateFpsModeUI(fps) {
+    this.elements.fpsButtons.forEach(btn => {
+      btn.classList.toggle('active', String(btn.dataset.fps) === String(fps));
+    });
+  }
+
+  updateBiasModeUI(mode) {
+    this.elements.biasModeButtons.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.biasmode === mode);
+    });
+    if (this.elements.biasPaletteRow) {
+      this.elements.biasPaletteRow.style.display = mode === 'off' ? 'none' : 'block';
+    }
   }
 
   updateActivePresetPill(activePreset) {
@@ -141,15 +205,65 @@ class PopupController {
     });
 
     // Checkbox'lar
-    this.elements.chkLetterbox.addEventListener('change', async (e) => {
-      await settingsManager.save({ letterboxDetection: e.target.checked });
-      this.notifyActiveTab();
+    const bindCheckbox = (el, key) => {
+      if (el) {
+        el.addEventListener('change', async (e) => {
+          await settingsManager.save({ [key]: e.target.checked });
+          this.notifyActiveTab();
+        });
+      }
+    };
+
+    bindCheckbox(this.elements.chkDualLayer, 'dualLayerGlow');
+    bindCheckbox(this.elements.chkBottomFade, 'bottomFade');
+    bindCheckbox(this.elements.chkLetterbox, 'letterboxDetection');
+    bindCheckbox(this.elements.chkPillarbox, 'pillarboxDetection');
+    bindCheckbox(this.elements.chkEco, 'ecoMode');
+    bindCheckbox(this.elements.chkBatteryEco, 'autoBatteryEco', () => {
+      this.updateBatteryUI();
+    });
+    bindCheckbox(this.elements.chkWorker, 'workerRender');
+
+    // FPS Butonları
+    this.elements.fpsButtons.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const fps = btn.dataset.fps;
+        this.updateFpsModeUI(fps);
+        await settingsManager.save({ targetFps: fps, activePreset: 'custom' });
+        this.updateActivePresetPill('custom');
+        this.notifyActiveTab();
+      });
     });
 
-    this.elements.chkEco.addEventListener('change', async (e) => {
-      await settingsManager.save({ ecoMode: e.target.checked });
-      this.notifyActiveTab();
+    // Bias Lighting Modları
+    this.elements.biasModeButtons.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const mode = btn.dataset.biasmode;
+        this.updateBiasModeUI(mode);
+        await settingsManager.save({ biasLightingMode: mode });
+        this.notifyActiveTab();
+      });
     });
+
+    // Bias Lighting Renk Seçimleri
+    this.elements.colorDots.forEach(dot => {
+      dot.addEventListener('click', async () => {
+        const color = dot.dataset.color;
+        this.elements.colorDots.forEach(d => d.classList.toggle('active', d === dot));
+        if (this.elements.colorPicker) this.elements.colorPicker.value = color;
+        await settingsManager.save({ biasLightingColor: color });
+        this.notifyActiveTab();
+      });
+    });
+
+    if (this.elements.colorPicker) {
+      this.elements.colorPicker.addEventListener('change', async (e) => {
+        const color = e.target.value;
+        this.elements.colorDots.forEach(d => d.classList.remove('active'));
+        await settingsManager.save({ biasLightingColor: color });
+        this.notifyActiveTab();
+      });
+    }
 
     // Sıfırla
     this.elements.btnReset.addEventListener('click', async () => {
@@ -159,6 +273,54 @@ class PopupController {
         this.notifyActiveTab();
       }
     });
+  }
+
+  initBatteryListener() {
+    if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
+      navigator.getBattery().then((battery) => {
+        this.battery = battery;
+        const onUpdate = () => this.updateBatteryUI();
+        battery.addEventListener('chargingchange', onUpdate);
+        battery.addEventListener('levelchange', onUpdate);
+        this.updateBatteryUI();
+      }).catch(() => {
+        this.updateBatteryUI();
+      });
+    } else {
+      this.updateBatteryUI();
+    }
+  }
+
+  updateBatteryUI() {
+    if (!this.elements.batteryBadge) return;
+    if (!this.battery) {
+      if (this.elements.batteryText) {
+        this.elements.batteryText.textContent = `${i18n.t('batteryStatusTitle')}: ${i18n.t('batteryNotSupported')}`;
+      }
+      if (this.elements.batteryIcon) this.elements.batteryIcon.textContent = '🔌';
+      return;
+    }
+
+    const charging = this.battery.charging;
+    const level = Math.round(this.battery.level * 100);
+    const isEco = settingsManager.current.autoBatteryEco && !charging && level <= 20;
+
+    this.elements.batteryBadge.classList.toggle('eco-active', isEco);
+    this.elements.batteryBadge.classList.toggle('charging', charging);
+
+    if (this.elements.batteryIcon) {
+      this.elements.batteryIcon.textContent = charging ? '⚡' : (level <= 20 ? '🪫' : '🔋');
+    }
+
+    if (this.elements.batteryText) {
+      if (isEco) {
+        this.elements.batteryText.textContent = `%${level} • ${i18n.t('batteryEcoActiveBadge')}`;
+      } else if (charging) {
+        this.elements.batteryText.textContent = `%${level} (${i18n.t('batteryCharging')})`;
+      } else {
+        this.elements.batteryText.textContent = `%${level} (${i18n.t('batteryDischarging')})`;
+      }
+    }
   }
 
   notifyActiveTab() {
@@ -184,4 +346,3 @@ class PopupController {
 }
 
 document.addEventListener('DOMContentLoaded', () => new PopupController());
-

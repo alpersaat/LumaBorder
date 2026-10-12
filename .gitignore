@@ -24,4 +24,6 @@ yarn-error.log*
 dist/
 build/
 _ref/
+node_modules/
+.tmp-package/
 

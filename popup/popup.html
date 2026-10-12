@@ -101,12 +101,68 @@
       </div>
     </div>
 
+    <!-- Sabit Arka Işık (Bias Lighting) -->
+    <div class="section-title" id="txt-biasLighting">Sabit Arka Işık (Bias Lighting)</div>
+    <div class="bias-modes-row">
+      <button class="bias-mode-btn active" data-biasmode="off" id="btn-bias-off">Kapalı</button>
+      <button class="bias-mode-btn" data-biasmode="pause" id="btn-bias-pause">Duraklatıldığında</button>
+      <button class="bias-mode-btn" data-biasmode="always" id="btn-bias-always">Her Zaman</button>
+    </div>
+    <div class="bias-palette-row" id="popup-bias-palette" style="display: none;">
+      <div class="color-dots-group">
+        <button class="color-dot active" data-color="#ffe4b5" style="background:#ffe4b5;" title="2700K"></button>
+        <button class="color-dot" data-color="#fff4e8" style="background:#fff4e8;" title="4000K"></button>
+        <button class="color-dot" data-color="#ffffff" style="background:#ffffff;" title="6500K"></button>
+        <button class="color-dot" data-color="#00e5ff" style="background:#00e5ff;" title="Neon Mavi"></button>
+        <button class="color-dot" data-color="#ff5e00" style="background:#ff5e00;" title="Neon Günbatımı"></button>
+        <button class="color-dot" data-color="#bd00ff" style="background:#bd00ff;" title="Neon Mor"></button>
+        <input type="color" id="popup-color-picker" class="popup-picker" value="#ffe4b5" title="Özel Renk">
+      </div>
+    </div>
+
+    <!-- Performans & Pil Section -->
+    <div class="section-title" id="txt-tabPerformance">Performans & Pil</div>
+    <div class="fps-modes-row">
+      <button class="fps-mode-btn active" data-fps="sync" id="btn-fps-sync">Eşzamanlı</button>
+      <button class="fps-mode-btn" data-fps="60" id="btn-fps-60">60 FPS</button>
+      <button class="fps-mode-btn" data-fps="30" id="btn-fps-30">30 FPS (Eko)</button>
+    </div>
+    <div class="popup-battery-badge" id="popup-battery-badge">
+      <span id="popup-battery-icon">🔋</span>
+      <span id="popup-battery-text">Pil: Kontrol ediliyor...</span>
+    </div>
+
     <!-- Extra Toggles -->
     <div class="toggles-grid">
       <label class="check-item">
+        <input type="checkbox" id="chk-duallayer" checked>
+        <span class="check-box"></span>
+        <span class="check-label" id="txt-dualLayerGlow">Çift Katmanlı Glow</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="chk-battery-eco" checked>
+        <span class="check-box"></span>
+        <span class="check-label" id="txt-autoBatteryEco">Pil Tasarrufu (<%20)</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="chk-worker" checked>
+        <span class="check-box"></span>
+        <span class="check-label" id="txt-workerRender">Worker / Offscreen</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="chk-bottomfade">
+        <span class="check-box"></span>
+        <span class="check-label" id="txt-bottomFade">Altyazı Koruması</span>
+      </label>
+      <label class="check-item">
         <input type="checkbox" id="chk-letterbox" checked>
         <span class="check-box"></span>
-        <span class="check-label" id="txt-letterboxDetection">Siyah Şeritleri Kırp</span>
+        <span class="check-label" id="txt-letterboxDetection">Letterbox Kırp</span>
+      </label>
+      <label class="check-item">
+        <input type="checkbox" id="chk-pillarbox" checked>
+        <span class="check-box"></span>
+        <span class="check-label" id="txt-pillarboxDetection">Pillarbox Kırp</span>
       </label>
       <label class="check-item">
         <input type="checkbox" id="chk-eco" checked>
@@ -121,7 +177,7 @@
         <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
         <span id="txt-resetDefaults">Sıfırla</span>
       </button>
-      <span class="footer-tag">LumaBorder v2.0</span>
+      <span class="footer-tag">LumaBorder v2.2 • Performans & Pil</span>
     </footer>
   </div>
 
