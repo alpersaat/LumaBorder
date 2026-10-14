@@ -223,7 +223,7 @@
       biasLightingMode: "off",
       biasLightingColor: "#ffe4b5",
       ecoMode: true,
-      targetFps: "sync",
+      targetFps: 30,
       workerRender: true,
       autoBatteryEco: true
     },
@@ -242,7 +242,7 @@
       biasLightingMode: "off",
       biasLightingColor: "#ffe4b5",
       ecoMode: true,
-      targetFps: "sync",
+      targetFps: 30,
       workerRender: true,
       autoBatteryEco: true
     },
@@ -320,7 +320,7 @@
     biasLightingMode: "off",
     biasLightingColor: "#ffe4b5",
     ecoMode: true,
-    targetFps: "sync",
+    targetFps: 30,
     workerRender: true,
     autoBatteryEco: true,
     theaterModeSync: true,
@@ -505,6 +505,52 @@
     }
   };
   var settingsManager = new SettingsManager();
+
+  // src/letterbox.js
+  var ZERO_CROP = Object.freeze({ top: 0, bottom: 0, left: 0, right: 0 });
+  var THRESHOLD = 18;
+  var lumAt = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  function analyzeLetterbox(imgData, w, h, { checkLetterbox = true, checkPillarbox = true, isShorts = false } = {}) {
+    const cx = Math.floor(w / 2);
+    const cy = Math.floor(h / 2);
+    let sum = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        sum += lumAt(imgData, ((cy + dy) * w + (cx + dx)) * 4);
+      }
+    }
+    if (sum / 9 <= THRESHOLD) return { ...ZERO_CROP };
+    const rowBlack = (y) => {
+      for (let x = 4; x < w - 4; x += 2) if (lumAt(imgData, (y * w + x) * 4) > THRESHOLD) return false;
+      return true;
+    };
+    const colBlack = (x) => {
+      for (let y = 2; y < h - 2; y += 2) if (lumAt(imgData, (y * w + x) * 4) > THRESHOLD) return false;
+      return true;
+    };
+    const crop = { ...ZERO_CROP };
+    if (checkLetterbox) {
+      for (let y = 0; y < Math.floor(h / 3); y++) {
+        if (rowBlack(y)) crop.top = (y + 1) / h;
+        else break;
+      }
+      for (let y = h - 1; y >= Math.floor(h * 0.66); y--) {
+        if (rowBlack(y)) crop.bottom = (h - y) / h;
+        else break;
+      }
+    }
+    if (checkPillarbox && !isShorts) {
+      for (let x = 0; x < Math.floor(w / 3); x++) {
+        if (colBlack(x)) crop.left = (x + 1) / w;
+        else break;
+      }
+      for (let x = w - 1; x >= Math.floor(w * 0.66); x--) {
+        if (colBlack(x)) crop.right = (w - x) / w;
+        else break;
+      }
+    }
+    return crop;
+  }
 
   // src/ambient-engine.js
   var AmbientEngine = class {
@@ -694,6 +740,10 @@
         if (this.onLoadedMetadata) this.video.removeEventListener("loadedmetadata", this.onLoadedMetadata);
         if (this.onEmptied) this.video.removeEventListener("emptied", this.onEmptied);
       }
+      if (this.intersectionObserver) {
+        this.intersectionObserver.disconnect();
+        this.intersectionObserver = null;
+      }
       if (this.onVisibilityChange) {
         document.removeEventListener("visibilitychange", this.onVisibilityChange);
         this.onVisibilityChange = null;
@@ -737,6 +787,18 @@
       this.video.addEventListener("loadedmetadata", this.onLoadedMetadata);
       this.video.addEventListener("emptied", this.onEmptied);
       document.addEventListener("visibilitychange", this.onVisibilityChange);
+      if (typeof IntersectionObserver !== "undefined" && this.player) {
+        this.intersectionObserver = new IntersectionObserver((entries) => {
+          const entry = entries[entries.length - 1];
+          if (!entry) return;
+          if (!entry.isIntersecting) {
+            this.stop();
+          } else if (!document.hidden && this.video && !this.video.paused && !this.video.ended) {
+            this.start();
+          }
+        });
+        this.intersectionObserver.observe(this.player);
+      }
       if (!this.video.paused && !this.video.ended && this.video.readyState >= 2) {
         this.start();
       } else if (this.settings.biasLightingMode === "pause" || this.settings.biasLightingMode === "always") {
@@ -874,6 +936,7 @@
       try {
         this.drawFrame();
       } catch (err) {
+        this.warnOnce("renderLoop", err);
       }
       scheduleNext();
     }
@@ -930,89 +993,7 @@
         const h = this.analysisCanvas.height;
         this.analysisCtx.drawImage(this.video, 0, 0, w, h);
         const imgData = this.analysisCtx.getImageData(0, 0, w, h).data;
-        const threshold = 18;
-        const centerX = Math.floor(w / 2);
-        const centerY = Math.floor(h / 2);
-        let centerLumSum = 0;
-        let sampleCount = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const idx = ((centerY + dy) * w + (centerX + dx)) * 4;
-            centerLumSum += 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-            sampleCount++;
-          }
-        }
-        const avgCenterLum = centerLumSum / sampleCount;
-        if (avgCenterLum <= threshold) {
-          this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
-          return;
-        }
-        let cropTop = 0;
-        let cropBottom = 0;
-        let cropLeft = 0;
-        let cropRight = 0;
-        if (checkLetterbox) {
-          for (let y = 0; y < Math.floor(h / 3); y++) {
-            let isBlackRow = true;
-            for (let x = 4; x < w - 4; x += 2) {
-              const idx = (y * w + x) * 4;
-              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-              if (lum > threshold) {
-                isBlackRow = false;
-                break;
-              }
-            }
-            if (isBlackRow) cropTop = (y + 1) / h;
-            else break;
-          }
-          for (let y = h - 1; y >= Math.floor(h * 0.66); y--) {
-            let isBlackRow = true;
-            for (let x = 4; x < w - 4; x += 2) {
-              const idx = (y * w + x) * 4;
-              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-              if (lum > threshold) {
-                isBlackRow = false;
-                break;
-              }
-            }
-            if (isBlackRow) cropBottom = (h - y) / h;
-            else break;
-          }
-        }
-        if (checkPillarbox && !this.isShorts) {
-          for (let x = 0; x < Math.floor(w / 3); x++) {
-            let isBlackCol = true;
-            for (let y = 2; y < h - 2; y += 2) {
-              const idx = (y * w + x) * 4;
-              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-              if (lum > threshold) {
-                isBlackCol = false;
-                break;
-              }
-            }
-            if (isBlackCol) cropLeft = (x + 1) / w;
-            else break;
-          }
-          for (let x = w - 1; x >= Math.floor(w * 0.66); x--) {
-            let isBlackCol = true;
-            for (let y = 2; y < h - 2; y += 2) {
-              const idx = (y * w + x) * 4;
-              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-              if (lum > threshold) {
-                isBlackCol = false;
-                break;
-              }
-            }
-            if (isBlackCol) cropRight = (w - x) / w;
-            else break;
-          }
-        }
-        this.letterboxCrop = {
-          top: cropTop,
-          bottom: cropBottom,
-          left: cropLeft,
-          right: cropRight
-        };
+        this.letterboxCrop = analyzeLetterbox(imgData, w, h, { checkLetterbox, checkPillarbox, isShorts: this.isShorts });
       } catch (e) {
         this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
       }
@@ -1043,17 +1024,7 @@
           this.canvasHeight
         );
         if (this.settings.dualLayerGlow && this.ctxTight) {
-          this.ctxTight.drawImage(
-            this.video,
-            sx,
-            sy,
-            sw,
-            sh,
-            0,
-            0,
-            this.canvasWidth,
-            this.canvasHeight
-          );
+          this.ctxTight.drawImage(this.canvasDiffuse, 0, 0);
         }
       } catch (err) {
         this.warnOnce("drawFrame", err);

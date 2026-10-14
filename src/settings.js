@@ -19,7 +19,7 @@ export const PRESETS = {
     biasLightingMode: 'off',
     biasLightingColor: '#ffe4b5',
     ecoMode: true,
-    targetFps: 'sync',
+    targetFps: 30,
     workerRender: true,
     autoBatteryEco: true
   },
@@ -38,7 +38,7 @@ export const PRESETS = {
     biasLightingMode: 'off',
     biasLightingColor: '#ffe4b5',
     ecoMode: true,
-    targetFps: 'sync',
+    targetFps: 30,
     workerRender: true,
     autoBatteryEco: true
   },
@@ -117,7 +117,7 @@ export const DEFAULT_SETTINGS = {
   biasLightingMode: 'off',
   biasLightingColor: '#ffe4b5',
   ecoMode: true,
-  targetFps: 'sync',
+  targetFps: 30,
   workerRender: true,
   autoBatteryEco: true,
   theaterModeSync: true,

@@ -23,7 +23,7 @@ const buildOptions = {
  * Derlemek için: npm run build | Canlı izleme için: npm run dev
  */`,
   },
-  minify: false, // Eklenti geliştirme ve hata ayıklama kolaylığı için okunabilir tutulur
+  minify: process.argv.includes('--release'), // --release ile küçültülür; geliştirmede okunabilir
   sourcemap: false,
 };
 

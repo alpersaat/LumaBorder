@@ -11,10 +11,10 @@ console.log('[LumaBorder] 📦 Paketleme başlatılıyor...');
 
 // Önce projeyi derle
 console.log('[LumaBorder] 🔨 Güncel kaynak kod derleniyor...');
-execSync('node scripts/build.js', { stdio: 'inherit' });
+execSync('node scripts/build.js --release', { stdio: 'inherit' });
 
 const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
-const version = manifest.version || '2.2.0';
+const version = manifest.version || '2.3.0';
 const zipName = `LumaBorder-v${version}.zip`;
 
 console.log(`[LumaBorder] 📁 Arşiv oluşturuluyor: ${zipName}`);

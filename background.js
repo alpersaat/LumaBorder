@@ -18,7 +18,7 @@ const INITIAL_SETTINGS = {
   biasLightingMode: 'off',
   biasLightingColor: '#ffe4b5',
   ecoMode: true,
-  targetFps: 'sync',
+  targetFps: 30,
   workerRender: true,
   autoBatteryEco: true,
   theaterModeSync: true,
