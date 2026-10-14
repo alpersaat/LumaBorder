@@ -21,7 +21,31 @@ export const PRESETS = {
     ecoMode: true,
     targetFps: 30,
     workerRender: true,
-    autoBatteryEco: true
+    autoBatteryEco: true,
+    renderEngine: 'webgl',
+    freezeDetection: true,
+    colorSpace: 'display-p3',
+    hdrTonemap: true,
+    edgeTop: true,
+    edgeRight: true,
+    edgeBottom: true,
+    edgeLeft: true,
+    edgeTopSpread: 100,
+    edgeRightSpread: 100,
+    edgeBottomSpread: 100,
+    edgeLeftSpread: 100,
+    multiZone: false,
+    zoneCount: 12,
+    barFill: false,
+    debanding: true,
+    colorTemperature: 6500,
+    autoSubtitleDim: true,
+    audioReactive: false,
+    audioSensitivity: 50,
+    nightShiftEnabled: false,
+    nightShiftStart: '22:00',
+    nightShiftEnd: '07:00',
+    dynamicAccent: false
   },
   cinema: {
     brightness: 85,
@@ -40,7 +64,31 @@ export const PRESETS = {
     ecoMode: true,
     targetFps: 30,
     workerRender: true,
-    autoBatteryEco: true
+    autoBatteryEco: true,
+    renderEngine: 'webgl',
+    freezeDetection: true,
+    colorSpace: 'display-p3',
+    hdrTonemap: true,
+    edgeTop: true,
+    edgeRight: true,
+    edgeBottom: true,
+    edgeLeft: true,
+    edgeTopSpread: 100,
+    edgeRightSpread: 100,
+    edgeBottomSpread: 70,
+    edgeLeftSpread: 100,
+    multiZone: false,
+    zoneCount: 12,
+    barFill: true,
+    debanding: true,
+    colorTemperature: 6500,
+    autoSubtitleDim: true,
+    audioReactive: false,
+    audioSensitivity: 50,
+    nightShiftEnabled: false,
+    nightShiftStart: '22:00',
+    nightShiftEnd: '07:00',
+    dynamicAccent: false
   },
   vibrant: {
     brightness: 130,
@@ -59,7 +107,31 @@ export const PRESETS = {
     ecoMode: false,
     targetFps: 'sync',
     workerRender: true,
-    autoBatteryEco: false
+    autoBatteryEco: false,
+    renderEngine: 'webgl',
+    freezeDetection: true,
+    colorSpace: 'display-p3',
+    hdrTonemap: true,
+    edgeTop: true,
+    edgeRight: true,
+    edgeBottom: true,
+    edgeLeft: true,
+    edgeTopSpread: 100,
+    edgeRightSpread: 100,
+    edgeBottomSpread: 100,
+    edgeLeftSpread: 100,
+    multiZone: true,
+    zoneCount: 16,
+    barFill: false,
+    debanding: true,
+    colorTemperature: 6500,
+    autoSubtitleDim: true,
+    audioReactive: false,
+    audioSensitivity: 50,
+    nightShiftEnabled: false,
+    nightShiftStart: '22:00',
+    nightShiftEnd: '07:00',
+    dynamicAccent: true
   },
   night: {
     brightness: 60,
@@ -78,7 +150,31 @@ export const PRESETS = {
     ecoMode: true,
     targetFps: 30,
     workerRender: true,
-    autoBatteryEco: true
+    autoBatteryEco: true,
+    renderEngine: 'webgl',
+    freezeDetection: true,
+    colorSpace: 'srgb',
+    hdrTonemap: true,
+    edgeTop: true,
+    edgeRight: true,
+    edgeBottom: false,
+    edgeLeft: true,
+    edgeTopSpread: 100,
+    edgeRightSpread: 100,
+    edgeBottomSpread: 50,
+    edgeLeftSpread: 100,
+    multiZone: false,
+    zoneCount: 12,
+    barFill: true,
+    debanding: true,
+    colorTemperature: 3200,
+    autoSubtitleDim: true,
+    audioReactive: false,
+    audioSensitivity: 50,
+    nightShiftEnabled: false,
+    nightShiftStart: '22:00',
+    nightShiftEnd: '07:00',
+    dynamicAccent: false
   },
   gaming: {
     brightness: 115,
@@ -97,7 +193,31 @@ export const PRESETS = {
     ecoMode: false,
     targetFps: 'sync',
     workerRender: true,
-    autoBatteryEco: false
+    autoBatteryEco: false,
+    renderEngine: 'webgl',
+    freezeDetection: true,
+    colorSpace: 'display-p3',
+    hdrTonemap: true,
+    edgeTop: true,
+    edgeRight: true,
+    edgeBottom: true,
+    edgeLeft: true,
+    edgeTopSpread: 100,
+    edgeRightSpread: 100,
+    edgeBottomSpread: 100,
+    edgeLeftSpread: 100,
+    multiZone: true,
+    zoneCount: 12,
+    barFill: false,
+    debanding: true,
+    colorTemperature: 7500,
+    autoSubtitleDim: true,
+    audioReactive: true,
+    audioSensitivity: 65,
+    nightShiftEnabled: false,
+    nightShiftStart: '22:00',
+    nightShiftEnd: '07:00',
+    dynamicAccent: true
   }
 };
 
@@ -123,7 +243,32 @@ export const DEFAULT_SETTINGS = {
   theaterModeSync: true,
   fullScreenSync: true,
   activePreset: 'default',
-  language: 'tr'
+  language: 'tr',
+  // Yeni Özellikler (v2.4 - v3.0)
+  renderEngine: 'webgl',
+  freezeDetection: true,
+  colorSpace: 'display-p3',
+  hdrTonemap: true,
+  edgeTop: true,
+  edgeRight: true,
+  edgeBottom: true,
+  edgeLeft: true,
+  edgeTopSpread: 100,
+  edgeRightSpread: 100,
+  edgeBottomSpread: 100,
+  edgeLeftSpread: 100,
+  multiZone: false,
+  zoneCount: 12,
+  barFill: false,
+  debanding: true,
+  colorTemperature: 6500,
+  autoSubtitleDim: true,
+  audioReactive: false,
+  audioSensitivity: 50,
+  nightShiftEnabled: false,
+  nightShiftStart: '22:00',
+  nightShiftEnd: '07:00',
+  dynamicAccent: false
 };
 
 export function sanitizeSettingValue(key, value) {
@@ -138,6 +283,38 @@ export function sanitizeSettingValue(key, value) {
     case 'bottomFadeStrength': {
       const num = Number(value);
       return Number.isFinite(num) ? Math.max(0, Math.min(500, Math.round(num))) : DEFAULT_SETTINGS[key];
+    }
+    case 'colorTemperature': {
+      const num = Number(value);
+      return Number.isFinite(num) ? Math.max(2200, Math.min(9300, Math.round(num))) : DEFAULT_SETTINGS.colorTemperature;
+    }
+    case 'edgeTopSpread':
+    case 'edgeRightSpread':
+    case 'edgeBottomSpread':
+    case 'edgeLeftSpread': {
+      const num = Number(value);
+      return Number.isFinite(num) ? Math.max(0, Math.min(200, Math.round(num))) : 100;
+    }
+    case 'zoneCount': {
+      const num = Number(value);
+      return [8, 12, 16].includes(num) ? num : DEFAULT_SETTINGS.zoneCount;
+    }
+    case 'audioSensitivity': {
+      const num = Number(value);
+      return Number.isFinite(num) ? Math.max(10, Math.min(100, Math.round(num))) : DEFAULT_SETTINGS.audioSensitivity;
+    }
+    case 'renderEngine': {
+      return ['webgl', 'canvas2d'].includes(value) ? value : DEFAULT_SETTINGS.renderEngine;
+    }
+    case 'colorSpace': {
+      return ['display-p3', 'srgb'].includes(value) ? value : DEFAULT_SETTINGS.colorSpace;
+    }
+    case 'nightShiftStart':
+    case 'nightShiftEnd': {
+      if (typeof value === 'string' && /^\d{2}:\d{2}$/.test(value.trim())) {
+        return value.trim();
+      }
+      return DEFAULT_SETTINGS[key];
     }
     case 'targetFps': {
       if (value === 'sync' || value === 60 || value === 30 || value === '60' || value === '30') {

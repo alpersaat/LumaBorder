@@ -1,13 +1,16 @@
 /**
- * LumaBorder - Letterbox / Pillarbox piksel analizi (saf fonksiyon, test edilebilir)
- * NOT: render-worker.js Blob URL ile yüklendiği için import edemez; algoritmanın aynısı orada da bulunur.
+ * LumaBorder - Letterbox / Pillarbox piksel analizi & Statik Sahne (Dirty Frame) tespiti
+ * Saf fonksiyonlar, test edilebilir ve hem ana iş parçacığında hem Worker içinde çalışabilir.
  */
 
 export const ZERO_CROP = Object.freeze({ top: 0, bottom: 0, left: 0, right: 0 });
 const THRESHOLD = 18;
 
-const lumAt = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+export const lumAt = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
 
+/**
+ * Letterbox ve Pillarbox siyah şerit tespiti
+ */
 export function analyzeLetterbox(imgData, w, h, { checkLetterbox = true, checkPillarbox = true, isShorts = false } = {}) {
   // Merkez de karanlıksa sahne kararmasıdır; kırpma uygulanmaz
   const cx = Math.floor(w / 2);
@@ -49,3 +52,33 @@ export function analyzeLetterbox(imgData, w, h, { checkLetterbox = true, checkPi
   return crop;
 }
 
+/**
+ * İki kare arasındaki zamansal parlaklık farkını hesaplar (Temporal Frame Difference).
+ * Podcast, durağan eğitim slaytları veya duraklatılmış sahnelerde gereksiz GPU render'ını durdurmak için kullanılır.
+ * @param {Uint8ClampedArray} prevData
+ * @param {Uint8ClampedArray} currData
+ * @param {number} threshold (varsayılan 1.5)
+ * @returns {{ isDirty: boolean, diff: number }}
+ */
+export function checkDirtyFrame(prevData, currData, threshold = 1.5) {
+  if (!prevData || !currData || prevData.length !== currData.length) {
+    return { isDirty: true, diff: 100 };
+  }
+
+  let totalDiff = 0;
+  let samples = 0;
+  const step = 8; // Her 8. pikseli örnekleyerek CPU yükünü sıfıra indir
+
+  for (let i = 0; i < currData.length; i += step * 4) {
+    const l1 = lumAt(prevData, i);
+    const l2 = lumAt(currData, i);
+    totalDiff += Math.abs(l1 - l2);
+    samples++;
+  }
+
+  const avgDiff = samples > 0 ? totalDiff / samples : 100;
+  return {
+    isDirty: avgDiff >= threshold,
+    diff: avgDiff
+  };
+}

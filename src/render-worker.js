@@ -10,13 +10,16 @@ let tightCtx = null;
 
 let analysisCanvas = null;
 let analysisCtx = null;
+let prevAnalysisData = null;
+
+const lumAt = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
 
 self.onmessage = function (e) {
   const { type, data } = e.data || {};
 
   switch (type) {
     case 'INIT': {
-      if (data.diffuseCanvas) {
+      if (data && data.diffuseCanvas) {
         diffuseCanvas = data.diffuseCanvas;
         diffuseCtx = diffuseCanvas.getContext('2d', {
           alpha: false,
@@ -24,7 +27,7 @@ self.onmessage = function (e) {
           willReadFrequently: false
         });
       }
-      if (data.tightCanvas) {
+      if (data && data.tightCanvas) {
         tightCanvas = data.tightCanvas;
         tightCtx = tightCanvas.getContext('2d', {
           alpha: false,
@@ -43,7 +46,7 @@ self.onmessage = function (e) {
     }
 
     case 'DRAW_FRAME': {
-      const { bitmap, sx, sy, sw, sh, canvasWidth, canvasHeight, dualLayer } = data;
+      const { bitmap, sx, sy, sw, sh, canvasWidth, canvasHeight, dualLayer } = data || {};
       if (!bitmap) return;
 
       try {
@@ -63,10 +66,13 @@ self.onmessage = function (e) {
     }
 
     case 'ANALYZE_PIXELS': {
-      const { bitmap, checkLetterbox, checkPillarbox, isShorts } = data;
+      const { bitmap, checkLetterbox, checkPillarbox, isShorts, checkDirty, extractColors } = data || {};
       if (!bitmap) return;
 
       let crop = { top: 0, bottom: 0, left: 0, right: 0 };
+      let isDirty = true;
+      let dominantColor = null;
+
       try {
         const reqW = isShorts ? 18 : 32;
         const reqH = isShorts ? 32 : 18;
@@ -77,11 +83,24 @@ self.onmessage = function (e) {
         const w = analysisCanvas.width;
         const h = analysisCanvas.height;
         analysisCtx.drawImage(bitmap, 0, 0, w, h);
-        const imgData = analysisCtx.getImageData(0, 0, w, h).data;
+        const imgDataObj = analysisCtx.getImageData(0, 0, w, h);
+        const imgData = imgDataObj.data;
         const threshold = 18;
 
-        // Sahne kararması kontrolü (Merkez parlaklık analizi):
-        // Eğer merkez de tamamen karanlıksa bu letterbox değil sahne kararmasıdır; kırpma uygulanmaz.
+        // 1. Statik Sahne / Dirty Frame Kontrolü
+        if (checkDirty && prevAnalysisData && prevAnalysisData.length === imgData.length) {
+          let totalDiff = 0;
+          let samples = 0;
+          for (let i = 0; i < imgData.length; i += 32) {
+            totalDiff += Math.abs(lumAt(prevAnalysisData, i) - lumAt(imgData, i));
+            samples++;
+          }
+          const avgDiff = samples > 0 ? totalDiff / samples : 100;
+          isDirty = avgDiff >= 1.2;
+        }
+        prevAnalysisData = new Uint8ClampedArray(imgData);
+
+        // 2. Letterbox / Pillarbox Analizi
         const centerX = Math.floor(w / 2);
         const centerY = Math.floor(h / 2);
         let centerLumSum = 0;
@@ -89,7 +108,7 @@ self.onmessage = function (e) {
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
             const idx = ((centerY + dy) * w + (centerX + dx)) * 4;
-            centerLumSum += 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+            centerLumSum += lumAt(imgData, idx);
             sampleCount++;
           }
         }
@@ -105,9 +124,7 @@ self.onmessage = function (e) {
             for (let y = 0; y < Math.floor(h / 3); y++) {
               let isBlack = true;
               for (let x = 4; x < w - 4; x += 2) {
-                const idx = (y * w + x) * 4;
-                const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-                if (lum > threshold) { isBlack = false; break; }
+                if (lumAt(imgData, (y * w + x) * 4) > threshold) { isBlack = false; break; }
               }
               if (isBlack) cropTop = (y + 1) / h; else break;
             }
@@ -115,9 +132,7 @@ self.onmessage = function (e) {
             for (let y = h - 1; y >= Math.floor(h * 0.66); y--) {
               let isBlack = true;
               for (let x = 4; x < w - 4; x += 2) {
-                const idx = (y * w + x) * 4;
-                const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-                if (lum > threshold) { isBlack = false; break; }
+                if (lumAt(imgData, (y * w + x) * 4) > threshold) { isBlack = false; break; }
               }
               if (isBlack) cropBottom = (h - y) / h; else break;
             }
@@ -127,9 +142,7 @@ self.onmessage = function (e) {
             for (let x = 0; x < Math.floor(w / 3); x++) {
               let isBlack = true;
               for (let y = 2; y < h - 2; y += 2) {
-                const idx = (y * w + x) * 4;
-                const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-                if (lum > threshold) { isBlack = false; break; }
+                if (lumAt(imgData, (y * w + x) * 4) > threshold) { isBlack = false; break; }
               }
               if (isBlack) cropLeft = (x + 1) / w; else break;
             }
@@ -137,15 +150,32 @@ self.onmessage = function (e) {
             for (let x = w - 1; x >= Math.floor(w * 0.66); x--) {
               let isBlack = true;
               for (let y = 2; y < h - 2; y += 2) {
-                const idx = (y * w + x) * 4;
-                const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-                if (lum > threshold) { isBlack = false; break; }
+                if (lumAt(imgData, (y * w + x) * 4) > threshold) { isBlack = false; break; }
               }
               if (isBlack) cropRight = (w - x) / w; else break;
             }
           }
 
           crop = { top: cropTop, bottom: cropBottom, left: cropLeft, right: cropRight };
+        }
+
+        // 3. Dynamic Accent Rengi Çıkarımı
+        if (extractColors) {
+          let maxSat = -1;
+          let bestR = 255, bestG = 0, bestB = 0;
+          for (let i = 0; i < imgData.length; i += 16) {
+            const r = imgData[i], g = imgData[i + 1], b = imgData[i + 2];
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
+            const lum = (max + min) / 2;
+            if (lum < 30 || lum > 230) continue;
+            const sat = max === 0 ? 0 : (max - min) / max;
+            if (sat > maxSat) {
+              maxSat = sat;
+              bestR = r; bestG = g; bestB = b;
+            }
+          }
+          const toHex = (c) => c.toString(16).padStart(2, '0');
+          dominantColor = `#${toHex(bestR)}${toHex(bestG)}${toHex(bestB)}`;
         }
       } catch (err) {
       } finally {
@@ -154,12 +184,12 @@ self.onmessage = function (e) {
         }
       }
 
-      self.postMessage({ type: 'ANALYSIS_RESULT', crop });
+      self.postMessage({ type: 'ANALYSIS_RESULT', crop, isDirty, dominantColor });
       break;
     }
 
     case 'DRAW_BIAS': {
-      const { color, canvasWidth, canvasHeight, dualLayer } = data;
+      const { color, canvasWidth, canvasHeight, dualLayer } = data || {};
       const fill = (ctx) => {
         if (!ctx) return;
         ctx.save();
@@ -173,4 +203,3 @@ self.onmessage = function (e) {
     }
   }
 };
-

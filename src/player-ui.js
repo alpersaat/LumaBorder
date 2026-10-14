@@ -107,12 +107,10 @@ export class PlayerUI {
         return { container: target, type: 'shorts', anchor: null, isFallback: false };
       }
 
-      // Shorts fallback: Player container üzerine floating buton
       const shortsContainer = activeReel?.querySelector?.('#player-container') || this.player || document.body;
       return { container: shortsContainer, type: 'shorts-floating', anchor: null, isFallback: true };
     }
 
-    // Standart YouTube Player Kontrol Çubuğu Arama Kademesi (A/B Testi & Tasarım Güncelleme Koruması)
     const rightControlsSelectors = [
       '.ytp-right-controls',
       '.ytp-chrome-bottom .ytp-right-controls',
@@ -131,7 +129,6 @@ export class PlayerUI {
     }
 
     if (rightControls) {
-      // Tercih sırasına göre yanına eklenecek buton araması
       const anchorSelectors = [
         '.ytp-settings-button',
         '.ytp-subtitles-button',
@@ -152,7 +149,6 @@ export class PlayerUI {
       return { container: rightControls, type: 'standard', anchor, isFallback: false };
     }
 
-    // Alternatif 1: Alt kontrol çubuğunun kendisi (.ytp-chrome-bottom)
     const bottomControls = this.player?.querySelector?.('.ytp-chrome-bottom') ||
       this.player?.querySelector?.('.ytp-chrome-controls') ||
       document.querySelector('.ytp-chrome-bottom');
@@ -160,21 +156,18 @@ export class PlayerUI {
       return { container: bottomControls, type: 'standard-alt', anchor: null, isFallback: false };
     }
 
-    // Alternatif 2: Sol kontrol çubuğu (.ytp-left-controls)
     const leftControls = this.player?.querySelector?.('.ytp-left-controls') ||
       document.querySelector('.ytp-left-controls');
     if (leftControls) {
       return { container: leftControls, type: 'standard-left', anchor: null, isFallback: false };
     }
 
-    // Alternatif 3: Üst çubuk (.ytp-chrome-top-buttons / .ytp-chrome-top)
     const topControls = this.player?.querySelector?.('.ytp-chrome-top-buttons') ||
       this.player?.querySelector?.('.ytp-chrome-top');
     if (topControls) {
       return { container: topControls, type: 'standard-top', anchor: null, isFallback: false };
     }
 
-    // Nihai Fallback: Player container üzerine sabit yüzen buton (Floating HUD)
     return { container: this.player || document.querySelector('#movie_player') || document.body, type: 'floating', anchor: null, isFallback: true };
   }
 
@@ -186,12 +179,10 @@ export class PlayerUI {
         return;
       }
 
-      // Buton zaten bağlı ve doğru container içinde mi?
       if (this.button && this.button.isConnected && this.button.parentElement === target.container) {
         return;
       }
 
-      // Eski veya öksüz butonları temizle
       const existing = document.querySelectorAll('.lumaborder-player-btn, .lumaborder-shorts-btn, .lumaborder-floating-btn');
       existing.forEach(b => {
         if (b !== this.button) b.remove();
@@ -214,7 +205,6 @@ export class PlayerUI {
         });
       }
 
-      // Stil ve başlık güncelleme
       if (target.type === 'shorts') {
         this.button.className = 'lumaborder-shorts-btn';
         this.button.title = `${i18n.t('appName')} - Shorts Ambient`;
@@ -226,7 +216,6 @@ export class PlayerUI {
         this.button.title = `${i18n.t('appName')} - ${i18n.t('appTagline')}`;
       }
 
-      // Container içine yerleştir
       if (target.anchor && target.anchor.parentNode === target.container) {
         target.container.insertBefore(this.button, target.anchor);
       } else {
@@ -282,7 +271,6 @@ export class PlayerUI {
       this.player.addEventListener('mousemove', this.onPlayerHover, { passive: true });
     }
 
-    // Dışarı tıklandığında menüyü kapat
     this.onDocumentClick = (e) => {
       if (this.isOpen && this.menuOverlay && !this.menuOverlay.contains(e.target) && this.button && !this.button.contains(e.target)) {
         this.closeMenu();
@@ -290,7 +278,6 @@ export class PlayerUI {
     };
     document.addEventListener('click', this.onDocumentClick);
 
-    // ESC basıldığında kapat
     this.onDocumentKeyDown = (e) => {
       if (e.key === 'Escape' && this.isOpen) {
         this.closeMenu();
@@ -341,7 +328,6 @@ export class PlayerUI {
     this.menuOverlay = document.createElement('div');
     this.menuOverlay.className = 'lumaborder-menu-overlay';
 
-    // Başlık & Üst Bar
     const header = document.createElement('div');
     header.className = 'lumaborder-menu-header';
     header.innerHTML = `
@@ -357,27 +343,25 @@ export class PlayerUI {
       </div>
     `;
 
-    // Sekmeler
     const tabs = document.createElement('div');
     tabs.className = 'lumaborder-tabs';
     tabs.innerHTML = `
       <button class="lumaborder-tab ${this.activeTab === 'general' ? 'active' : ''}" data-tab="general">${i18n.t('tabGeneral')}</button>
       <button class="lumaborder-tab ${this.activeTab === 'effects' ? 'active' : ''}" data-tab="effects">${i18n.t('tabEffects')}</button>
+      <button class="lumaborder-tab ${this.activeTab === 'ambilight' ? 'active' : ''}" data-tab="ambilight">${i18n.t('tabAmbilight')}</button>
       <button class="lumaborder-tab ${this.activeTab === 'presets' ? 'active' : ''}" data-tab="presets">${i18n.t('tabPresets')}</button>
       <button class="lumaborder-tab ${this.activeTab === 'performance' ? 'active' : ''}" data-tab="performance">${i18n.t('tabPerformance')}</button>
     `;
 
-    // İçerik Alanı
     const content = document.createElement('div');
     content.className = 'lumaborder-tab-content';
     content.innerHTML = this.getTabContentHTML(this.activeTab);
 
-    // Alt Bar
     const footer = document.createElement('div');
     footer.className = 'lumaborder-menu-footer';
     footer.innerHTML = `
       <button class="lumaborder-reset-btn" id="lumaborder-reset-all">${i18n.t('resetDefaults')}</button>
-      <span class="lumaborder-badge">v2.2 • LumaBorder Pro</span>
+      <span class="lumaborder-badge">v3.0 • LumaBorder Ultra</span>
     `;
 
     this.menuOverlay.appendChild(header);
@@ -385,7 +369,6 @@ export class PlayerUI {
     this.menuOverlay.appendChild(content);
     this.menuOverlay.appendChild(footer);
 
-    // Menü içindeki tıklama ve klavye etkileşimlerinin YouTube oynatıcısını tetiklemesini önle
     this.menuOverlay.addEventListener('click', (e) => e.stopPropagation());
     this.menuOverlay.addEventListener('mousedown', (e) => e.stopPropagation());
     this.menuOverlay.addEventListener('keydown', (e) => e.stopPropagation());
@@ -464,6 +447,43 @@ export class PlayerUI {
           </div>
           <input type="range" class="lumaborder-range" id="rng-blur" min="10" max="120" value="${s.blur}">
         </div>
+
+        <!-- 4-Bölge Bağımsız Kenar Kontrolü (Item 2.1) -->
+        <div class="lumaborder-section-divider"></div>
+        <div class="lumaborder-control-header" style="margin-top: 8px;">
+          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('edgeControls')}</span>
+        </div>
+        <div class="lumaborder-hint-text">${i18n.t('edgeControlsDesc')}</div>
+        <div class="lumaborder-edge-grid">
+          <div class="lumaborder-edge-item">
+            <div class="lumaborder-edge-header">
+              <span>${i18n.t('edgeTop')}</span>
+              <input type="checkbox" id="chk-edge-top" ${s.edgeTop ? 'checked' : ''}>
+            </div>
+            <input type="range" class="lumaborder-range" id="rng-edge-top" min="0" max="200" value="${s.edgeTopSpread}">
+          </div>
+          <div class="lumaborder-edge-item">
+            <div class="lumaborder-edge-header">
+              <span>${i18n.t('edgeRight')}</span>
+              <input type="checkbox" id="chk-edge-right" ${s.edgeRight ? 'checked' : ''}>
+            </div>
+            <input type="range" class="lumaborder-range" id="rng-edge-right" min="0" max="200" value="${s.edgeRightSpread}">
+          </div>
+          <div class="lumaborder-edge-item">
+            <div class="lumaborder-edge-header">
+              <span>${i18n.t('edgeBottom')}</span>
+              <input type="checkbox" id="chk-edge-bottom" ${s.edgeBottom ? 'checked' : ''}>
+            </div>
+            <input type="range" class="lumaborder-range" id="rng-edge-bottom" min="0" max="200" value="${s.edgeBottomSpread}">
+          </div>
+          <div class="lumaborder-edge-item">
+            <div class="lumaborder-edge-header">
+              <span>${i18n.t('edgeLeft')}</span>
+              <input type="checkbox" id="chk-edge-left" ${s.edgeLeft ? 'checked' : ''}>
+            </div>
+            <input type="range" class="lumaborder-range" id="rng-edge-left" min="0" max="200" value="${s.edgeLeftSpread}">
+          </div>
+        </div>
       `;
     }
 
@@ -497,24 +517,38 @@ export class PlayerUI {
           <input type="range" class="lumaborder-range" id="rng-smoothing" min="0" max="100" value="${s.smoothing}">
         </div>
 
-        <!-- Altyazı Koruması (Alt Karartma) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
+        <!-- Kelvin Renk Sıcaklığı (Item 2.5) -->
+        <div class="lumaborder-control-row" style="margin-top: 10px;">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${i18n.t('colorTemperature')}</span>
+            <span class="lumaborder-control-value" id="val-kelvin">${s.colorTemperature || 6500}K</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-kelvin" min="2200" max="9300" step="50" value="${s.colorTemperature || 6500}">
+          <div class="lumaborder-hint-text">${i18n.t('colorTemperatureDesc')}</div>
+        </div>
+
+        <!-- Dynamic Accent Tinting (Item 3.4) -->
+        <div class="lumaborder-master-card" style="margin-top: 10px;">
           <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('bottomFade')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('bottomFadeDesc')}</span>
+            <span class="lumaborder-master-title">${i18n.t('dynamicAccent')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('dynamicAccentDesc')}</span>
           </div>
           <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-bottomfade" ${s.bottomFade ? 'checked' : ''}>
+            <input type="checkbox" id="chk-dynamic-accent" ${s.dynamicAccent ? 'checked' : ''}>
             <span class="lumaborder-slider-round"></span>
           </label>
         </div>
 
-        <div class="lumaborder-control-row" id="row-bottomfade-strength" style="${s.bottomFade ? '' : 'display:none;'}">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('bottomFadeStrength')}</span>
-            <span class="lumaborder-control-value" id="val-bottomfade-strength">${s.bottomFadeStrength || 60}%</span>
+        <!-- Dinamik Altyazı Kısma (Item 2.6) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${i18n.t('autoSubtitleDim')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('autoSubtitleDimDesc')}</span>
           </div>
-          <input type="range" class="lumaborder-range" id="rng-bottomfade-strength" min="20" max="100" value="${s.bottomFadeStrength || 60}">
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-auto-sub-dim" ${s.autoSubtitleDim ? 'checked' : ''}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
         </div>
 
         <!-- Sabit Arka Işık (Bias Lighting) -->
@@ -539,6 +573,88 @@ export class PlayerUI {
             <button class="lumaborder-color-dot ${s.biasLightingColor === '#bd00ff' ? 'active' : ''}" data-color="#bd00ff" title="${i18n.t('biasColorPurple')}" style="background: #bd00ff;"></button>
             <input type="color" id="bias-custom-color" class="lumaborder-color-picker" value="${(typeof s.biasLightingColor === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.biasLightingColor.trim())) ? s.biasLightingColor.trim() : '#ffe4b5'}" title="${i18n.t('biasColorCustom')}">
           </div>
+        </div>
+      `;
+    }
+
+    if (tab === 'ambilight') {
+      return `
+        <!-- Çok Bölgeli Ambilight (Item 2.2) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${i18n.t('multiZone')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('multiZoneDesc')}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-multizone" ${s.multiZone ? 'checked' : ''}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+        <div class="lumaborder-zone-modes">
+          <button class="lumaborder-mode-pill ${s.zoneCount === 8 ? 'active' : ''}" data-zones="8">8 ${i18n.t('zoneCount')}</button>
+          <button class="lumaborder-mode-pill ${s.zoneCount === 12 ? 'active' : ''}" data-zones="12">12 ${i18n.t('zoneCount')}</button>
+          <button class="lumaborder-mode-pill ${s.zoneCount === 16 ? 'active' : ''}" data-zones="16">16 ${i18n.t('zoneCount')}</button>
+        </div>
+
+        <!-- Siyah Şerit Doldurucu (Bar Fill - Item 2.3) -->
+        <div class="lumaborder-master-card" style="margin-top: 14px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${i18n.t('barFill')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('barFillDesc')}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-barfill" ${s.barFill ? 'checked' : ''}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Banding Önleme (Dithering - Item 2.4) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${i18n.t('debanding')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('debandingDesc')}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-debanding" ${s.debanding ? 'checked' : ''}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Müzik & Bas Reaktif Ritim Modu (Item 3.1) -->
+        <div class="lumaborder-master-card" style="margin-top: 14px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${i18n.t('audioReactive')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('audioReactiveDesc')}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-audio-reactive" ${s.audioReactive ? 'checked' : ''}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+        <div class="lumaborder-control-row" id="row-audio-sens" style="${s.audioReactive ? '' : 'display:none;'}">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${i18n.t('audioSensitivity')}</span>
+            <span class="lumaborder-control-value" id="val-audio-sens">${s.audioSensitivity || 50}%</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-audio-sens" min="10" max="100" value="${s.audioSensitivity || 50}">
+        </div>
+
+        <!-- Zaman Ayarlı Gece Karartması (Item 3.3) -->
+        <div class="lumaborder-master-card" style="margin-top: 14px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${i18n.t('nightShift')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('nightShiftDesc')}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-night-shift" ${s.nightShiftEnabled ? 'checked' : ''}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+        <div class="lumaborder-time-row" id="row-night-shift-time" style="${s.nightShiftEnabled ? '' : 'display:none;'}">
+          <span>Saat:</span>
+          <input type="text" class="lumaborder-time-input" id="inp-night-start" value="${s.nightShiftStart || '22:00'}" style="width: 55px;">
+          <span>—</span>
+          <input type="text" class="lumaborder-time-input" id="inp-night-end" value="${s.nightShiftEnd || '07:00'}" style="width: 55px;">
         </div>
       `;
     }
@@ -573,8 +689,50 @@ export class PlayerUI {
     if (tab === 'performance') {
       const fpsLabel = s.targetFps === 'sync' ? i18n.t('fpsSync') : `${s.targetFps} FPS`;
       return `
-        <!-- Hedef Kare Hızı (FPS Limiti) -->
+        <!-- Render Motoru (Item 1.1) -->
         <div class="lumaborder-control-header" style="margin-top: 4px;">
+          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('renderEngine')}</span>
+        </div>
+        <div class="lumaborder-engine-modes">
+          <button class="lumaborder-mode-pill ${s.renderEngine === 'webgl' ? 'active' : ''}" data-engine="webgl">${i18n.t('engineWebGL')}</button>
+          <button class="lumaborder-mode-pill ${s.renderEngine === 'canvas2d' ? 'active' : ''}" data-engine="canvas2d">${i18n.t('engineCanvas2D')}</button>
+        </div>
+        <div class="lumaborder-hint-text">${i18n.t('renderEngineDesc')}</div>
+
+        <!-- Renk Uzayı & HDR Tonemapping (Item 1.5) -->
+        <div class="lumaborder-control-header" style="margin-top: 10px;">
+          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('colorSpace')}</span>
+        </div>
+        <div class="lumaborder-engine-modes">
+          <button class="lumaborder-mode-pill ${s.colorSpace === 'display-p3' ? 'active' : ''}" data-cspace="display-p3">Display P3 (HDR)</button>
+          <button class="lumaborder-mode-pill ${s.colorSpace === 'srgb' ? 'active' : ''}" data-cspace="srgb">sRGB (Standart)</button>
+        </div>
+
+        <div class="lumaborder-master-card" style="margin-top: 8px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${i18n.t('hdrTonemap')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('hdrTonemapDesc')}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-hdr-tonemap" ${s.hdrTonemap ? 'checked' : ''}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Statik Sahne Dondurucu (Dirty Frame Freeze - Item 1.2) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${i18n.t('freezeDetection')}</span>
+            <span class="lumaborder-master-sub">${i18n.t('freezeDetectionDesc')}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-freeze" ${s.freezeDetection ? 'checked' : ''}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Hedef Kare Hızı (FPS Limiti) -->
+        <div class="lumaborder-control-header" style="margin-top: 12px;">
           <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('targetFps')}</span>
           <span class="lumaborder-control-value" id="val-target-fps">${fpsLabel}</span>
         </div>
@@ -583,7 +741,6 @@ export class PlayerUI {
           <button class="lumaborder-mode-pill ${String(s.targetFps) === '60' ? 'active' : ''}" data-fps="60">${i18n.t('fps60')}</button>
           <button class="lumaborder-mode-pill ${String(s.targetFps) === '30' ? 'active' : ''}" data-fps="30">${i18n.t('fps30')}</button>
         </div>
-        <div class="lumaborder-hint-text">${i18n.t('targetFpsDesc')}</div>
 
         <!-- Akıllı Pil Tasarrufu (%20 Altı Otomatik 30 FPS) -->
         <div class="lumaborder-master-card" style="margin-top: 14px;">
@@ -609,7 +766,7 @@ export class PlayerUI {
           <span class="lumaborder-battery-tag" id="lumaborder-battery-tag">--</span>
         </div>
 
-        <!-- OffscreenCanvas & Worker Render -->
+        <!-- OffscreenCanvas & Worker Render (Item 1.3) -->
         <div class="lumaborder-master-card" style="margin-top: 12px;">
           <div class="lumaborder-master-text">
             <span class="lumaborder-master-title">${i18n.t('workerRender')}</span>
@@ -621,7 +778,7 @@ export class PlayerUI {
           </label>
         </div>
 
-        <!-- Siyah Şerit Algılama: Letterbox (Üst/Alt) -->
+        <!-- Siyah Şerit Algılama (Item 1.4) -->
         <div class="lumaborder-master-card">
           <div class="lumaborder-master-text">
             <span class="lumaborder-master-title">${i18n.t('letterboxDetection')}</span>
@@ -633,7 +790,6 @@ export class PlayerUI {
           </label>
         </div>
 
-        <!-- Siyah Şerit Algılama: Pillarbox (Sağ/Sol) -->
         <div class="lumaborder-master-card">
           <div class="lumaborder-master-text">
             <span class="lumaborder-master-title">${i18n.t('pillarboxDetection')}</span>
@@ -641,18 +797,6 @@ export class PlayerUI {
           </div>
           <label class="lumaborder-switch">
             <input type="checkbox" id="chk-pillarbox" ${s.pillarboxDetection ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Güç Tasarrufu -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('ecoMode')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('ecoModeDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-eco" ${s.ecoMode ? 'checked' : ''}>
             <span class="lumaborder-slider-round"></span>
           </label>
         </div>
@@ -665,11 +809,9 @@ export class PlayerUI {
   bindMenuEvents() {
     if (!this.menuOverlay) return;
 
-    // Kapat butonu
     const closeBtn = this.menuOverlay.querySelector('#lumaborder-close-menu');
     if (closeBtn) closeBtn.addEventListener('click', () => this.closeMenu());
 
-    // Dil butonu
     const langBtn = this.menuOverlay.querySelector('#lumaborder-lang-toggle');
     if (langBtn) {
       langBtn.addEventListener('click', async () => {
@@ -680,7 +822,6 @@ export class PlayerUI {
       });
     }
 
-    // Sıfırla
     const resetBtn = this.menuOverlay.querySelector('#lumaborder-reset-all');
     if (resetBtn) {
       resetBtn.addEventListener('click', async () => {
@@ -693,7 +834,6 @@ export class PlayerUI {
       });
     }
 
-    // Sekme geçişleri
     const tabBtns = this.menuOverlay.querySelectorAll('.lumaborder-tab');
     tabBtns.forEach(btn => {
       btn.addEventListener('click', () => {
@@ -730,8 +870,8 @@ export class PlayerUI {
       }, { signal });
     }
 
-    // Slider'lar
-    const bindSlider = (id, key, unit = '%') => {
+    // Slider bağlayıcı
+    const bindSlider = (id, key, unit = '%', isDirectNumber = false) => {
       const slider = this.menuOverlay.querySelector(`#rng-${id}`);
       const valLabel = this.menuOverlay.querySelector(`#val-${id}`);
       if (slider && valLabel) {
@@ -753,17 +893,30 @@ export class PlayerUI {
     bindSlider('saturation', 'saturation', '%');
     bindSlider('contrast', 'contrast', '%');
     bindSlider('smoothing', 'smoothing', '%');
-    bindSlider('bottomfade-strength', 'bottomFadeStrength', '%');
+    bindSlider('kelvin', 'colorTemperature', 'K');
+    bindSlider('audio-sens', 'audioSensitivity', '%');
 
-    // Preset butonları
-    const presetBtns = this.menuOverlay.querySelectorAll('.lumaborder-preset-btn');
-    presetBtns.forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const presetKey = btn.dataset.preset;
-        await this.settingsManager.applyPreset(presetKey);
-        this.ambientEngine.applySettings(this.settingsManager.current);
-        this.renderMenu();
-      }, { signal });
+    // 4-Bölge Kenar Slider'ları
+    ['top', 'right', 'bottom', 'left'].forEach(edge => {
+      const capitalized = edge.charAt(0).toUpperCase() + edge.slice(1);
+      const chk = this.menuOverlay.querySelector(`#chk-edge-${edge}`);
+      if (chk) {
+        chk.addEventListener('change', async (e) => {
+          await this.settingsManager.save({ [`edge${capitalized}`]: e.target.checked });
+          this.ambientEngine.applySettings({ [`edge${capitalized}`]: e.target.checked });
+        }, { signal });
+      }
+      const rng = this.menuOverlay.querySelector(`#rng-edge-${edge}`);
+      if (rng) {
+        rng.addEventListener('input', (e) => {
+          const val = parseInt(e.target.value, 10);
+          this.ambientEngine.applySettings({ [`edge${capitalized}Spread`]: val });
+        }, { signal });
+        rng.addEventListener('change', async (e) => {
+          const val = parseInt(e.target.value, 10);
+          await this.settingsManager.save({ [`edge${capitalized}Spread`]: val });
+        }, { signal });
+      }
     });
 
     // Checkbox'lar
@@ -781,14 +934,73 @@ export class PlayerUI {
     bindCheckbox('duallayer', 'dualLayerGlow');
     bindCheckbox('letterbox', 'letterboxDetection');
     bindCheckbox('pillarbox', 'pillarboxDetection');
-    bindCheckbox('eco', 'ecoMode');
     bindCheckbox('battery-eco', 'autoBatteryEco', () => {
       this.updateBatteryCard(this.ambientEngine?.batteryInfo);
     });
     bindCheckbox('worker', 'workerRender');
-    bindCheckbox('bottomfade', 'bottomFade', (checked) => {
-      const row = this.menuOverlay.querySelector('#row-bottomfade-strength');
+    bindCheckbox('freeze', 'freezeDetection');
+    bindCheckbox('hdr-tonemap', 'hdrTonemap');
+    bindCheckbox('dynamic-accent', 'dynamicAccent');
+    bindCheckbox('auto-sub-dim', 'autoSubtitleDim');
+    bindCheckbox('multizone', 'multiZone');
+    bindCheckbox('barfill', 'barFill');
+    bindCheckbox('debanding', 'debanding');
+    bindCheckbox('audio-reactive', 'audioReactive', (checked) => {
+      const row = this.menuOverlay.querySelector('#row-audio-sens');
       if (row) row.style.display = checked ? 'block' : 'none';
+    });
+    bindCheckbox('night-shift', 'nightShiftEnabled', (checked) => {
+      const row = this.menuOverlay.querySelector('#row-night-shift-time');
+      if (row) row.style.display = checked ? 'flex' : 'none';
+    });
+
+    // Zaman Girişleri (Night Shift)
+    const startInp = this.menuOverlay.querySelector('#inp-night-start');
+    const endInp = this.menuOverlay.querySelector('#inp-night-end');
+    if (startInp) {
+      startInp.addEventListener('change', async (e) => {
+        await this.settingsManager.save({ nightShiftStart: e.target.value });
+        this.ambientEngine.applySettings({ nightShiftStart: e.target.value });
+      }, { signal });
+    }
+    if (endInp) {
+      endInp.addEventListener('change', async (e) => {
+        await this.settingsManager.save({ nightShiftEnd: e.target.value });
+        this.ambientEngine.applySettings({ nightShiftEnd: e.target.value });
+      }, { signal });
+    }
+
+    // Engine Mode Seçimi (WebGL vs Canvas2D)
+    const engineBtns = this.menuOverlay.querySelectorAll('.lumaborder-engine-modes .lumaborder-mode-pill[data-engine]');
+    engineBtns.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const engine = btn.dataset.engine;
+        engineBtns.forEach(b => b.classList.toggle('active', b === btn));
+        await this.settingsManager.save({ renderEngine: engine });
+        this.ambientEngine.applySettings({ renderEngine: engine });
+      }, { signal });
+    });
+
+    // Color Space Seçimi (Display P3 vs sRGB)
+    const cspaceBtns = this.menuOverlay.querySelectorAll('.lumaborder-engine-modes .lumaborder-mode-pill[data-cspace]');
+    cspaceBtns.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const cspace = btn.dataset.cspace;
+        cspaceBtns.forEach(b => b.classList.toggle('active', b === btn));
+        await this.settingsManager.save({ colorSpace: cspace });
+        this.ambientEngine.applySettings({ colorSpace: cspace });
+      }, { signal });
+    });
+
+    // Multi-Zone Sayısı Butonları
+    const zoneBtns = this.menuOverlay.querySelectorAll('.lumaborder-zone-modes .lumaborder-mode-pill');
+    zoneBtns.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const zones = parseInt(btn.dataset.zones, 10);
+        zoneBtns.forEach(b => b.classList.toggle('active', b === btn));
+        await this.settingsManager.save({ zoneCount: zones });
+        this.ambientEngine.applySettings({ zoneCount: zones });
+      }, { signal });
     });
 
     // FPS Butonları
@@ -804,10 +1016,21 @@ export class PlayerUI {
       }, { signal });
     });
 
+    // Preset butonları
+    const presetBtns = this.menuOverlay.querySelectorAll('.lumaborder-preset-btn');
+    presetBtns.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const presetKey = btn.dataset.preset;
+        await this.settingsManager.applyPreset(presetKey);
+        this.ambientEngine.applySettings(this.settingsManager.current);
+        this.renderMenu();
+      }, { signal });
+    });
+
     // Pil Bilgisi Kartı
     this.updateBatteryCard(this.ambientEngine?.batteryInfo);
 
-    // Bias Lighting Mode Butonları (Yalnızca bias modu butonlarını seç)
+    // Bias Lighting Mode Butonları
     const biasModeBtns = this.menuOverlay.querySelectorAll('.lumaborder-bias-modes .lumaborder-mode-pill');
     biasModeBtns.forEach(btn => {
       btn.addEventListener('click', async () => {

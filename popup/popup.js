@@ -37,10 +37,17 @@ class PopupController {
       rngSaturation: document.getElementById('rng-saturation'),
       valSaturation: document.getElementById('val-saturation'),
       chkDualLayer: document.getElementById('chk-duallayer'),
-      chkBottomFade: document.getElementById('chk-bottomfade'),
+      chkWebGL: document.getElementById('chk-webgl'),
+      chkMultiZone: document.getElementById('chk-multizone'),
+      chkBarFill: document.getElementById('chk-barfill'),
+      chkDebanding: document.getElementById('chk-debanding'),
+      chkAudioReactive: document.getElementById('chk-audio-reactive'),
+      chkNightShift: document.getElementById('chk-night-shift'),
+      chkDynamicAccent: document.getElementById('chk-dynamic-accent'),
+      chkAutoSubDim: document.getElementById('chk-auto-sub-dim'),
+      chkFreeze: document.getElementById('chk-freeze'),
       chkLetterbox: document.getElementById('chk-letterbox'),
       chkPillarbox: document.getElementById('chk-pillarbox'),
-      chkEco: document.getElementById('chk-eco'),
       chkBatteryEco: document.getElementById('chk-battery-eco'),
       chkWorker: document.getElementById('chk-worker'),
       btnReset: document.getElementById('btn-reset'),
@@ -115,10 +122,17 @@ class PopupController {
     this.elements.valSaturation.textContent = `${s.saturation}%`;
 
     if (this.elements.chkDualLayer) this.elements.chkDualLayer.checked = s.dualLayerGlow;
-    if (this.elements.chkBottomFade) this.elements.chkBottomFade.checked = s.bottomFade;
+    if (this.elements.chkWebGL) this.elements.chkWebGL.checked = s.renderEngine === 'webgl';
+    if (this.elements.chkMultiZone) this.elements.chkMultiZone.checked = s.multiZone;
+    if (this.elements.chkBarFill) this.elements.chkBarFill.checked = s.barFill;
+    if (this.elements.chkDebanding) this.elements.chkDebanding.checked = s.debanding;
+    if (this.elements.chkAudioReactive) this.elements.chkAudioReactive.checked = s.audioReactive;
+    if (this.elements.chkNightShift) this.elements.chkNightShift.checked = s.nightShiftEnabled;
+    if (this.elements.chkDynamicAccent) this.elements.chkDynamicAccent.checked = s.dynamicAccent;
+    if (this.elements.chkAutoSubDim) this.elements.chkAutoSubDim.checked = s.autoSubtitleDim;
+    if (this.elements.chkFreeze) this.elements.chkFreeze.checked = s.freezeDetection;
     if (this.elements.chkLetterbox) this.elements.chkLetterbox.checked = s.letterboxDetection;
     if (this.elements.chkPillarbox) this.elements.chkPillarbox.checked = s.pillarboxDetection;
-    if (this.elements.chkEco) this.elements.chkEco.checked = s.ecoMode;
     if (this.elements.chkBatteryEco) this.elements.chkBatteryEco.checked = s.autoBatteryEco;
     if (this.elements.chkWorker) this.elements.chkWorker.checked = s.workerRender;
 
@@ -216,10 +230,23 @@ class PopupController {
     };
 
     bindCheckbox(this.elements.chkDualLayer, 'dualLayerGlow');
-    bindCheckbox(this.elements.chkBottomFade, 'bottomFade');
+    if (this.elements.chkWebGL) {
+      this.elements.chkWebGL.addEventListener('change', async (e) => {
+        const engine = e.target.checked ? 'webgl' : 'canvas2d';
+        await settingsManager.save({ renderEngine: engine });
+        this.notifyActiveTab();
+      });
+    }
+    bindCheckbox(this.elements.chkMultiZone, 'multiZone');
+    bindCheckbox(this.elements.chkBarFill, 'barFill');
+    bindCheckbox(this.elements.chkDebanding, 'debanding');
+    bindCheckbox(this.elements.chkAudioReactive, 'audioReactive');
+    bindCheckbox(this.elements.chkNightShift, 'nightShiftEnabled');
+    bindCheckbox(this.elements.chkDynamicAccent, 'dynamicAccent');
+    bindCheckbox(this.elements.chkAutoSubDim, 'autoSubtitleDim');
+    bindCheckbox(this.elements.chkFreeze, 'freezeDetection');
     bindCheckbox(this.elements.chkLetterbox, 'letterboxDetection');
     bindCheckbox(this.elements.chkPillarbox, 'pillarboxDetection');
-    bindCheckbox(this.elements.chkEco, 'ecoMode');
     bindCheckbox(this.elements.chkBatteryEco, 'autoBatteryEco', () => {
       this.updateBatteryUI();
     });

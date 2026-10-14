@@ -207,3 +207,106 @@ ytd-reel-video-renderer #overlay {
   fill: #ff9100;
   filter: drop-shadow(0 0 8px #ff7b00);
 }
+
+/* 4-Bölge Bağımsız Kenar Kontrolü & Dinamik Maskeleme (Item 2.1) */
+.lumaborder-ambient-container.edge-top-off {
+  clip-path: inset(var(--lumaborder-clip-top, 25%) 0 0 0);
+}
+.lumaborder-ambient-container.edge-bottom-off {
+  clip-path: inset(0 0 var(--lumaborder-clip-bottom, 25%) 0);
+}
+.lumaborder-ambient-container.edge-left-off {
+  clip-path: inset(0 0 0 var(--lumaborder-clip-left, 25%));
+}
+.lumaborder-ambient-container.edge-right-off {
+  clip-path: inset(0 var(--lumaborder-clip-right, 25%) 0 0);
+}
+
+/* Çok Bölgeli Ambilight (Multi-Zone) LED Katmanı (Item 2.2) */
+.lumaborder-canvas-multizone {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+  border-radius: 12px;
+  z-index: 2;
+  opacity: 0.95;
+  filter: blur(var(--lumaborder-blur, 45px))
+          brightness(var(--lumaborder-brightness, 1))
+          contrast(var(--lumaborder-contrast, 1.05))
+          saturate(var(--lumaborder-saturate, 1.2));
+  transform: scale(var(--lumaborder-scale-x, 1.25), var(--lumaborder-scale-y, 1.25)) translateZ(0);
+  transition: filter var(--lumaborder-transition, 0.15s) ease-out,
+              transform var(--lumaborder-transition, 0.15s) ease-out;
+}
+
+/* Siyah Şerit Doldurucu (Ultrawide Letterbox & Pillarbox Bar Fill - Item 2.3) */
+.lumaborder-bar-fill-container {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+  z-index: 1 !important;
+  overflow: hidden !important;
+}
+
+.lumaborder-bar-fill {
+  position: absolute;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) brightness(0.85);
+  opacity: 0.85;
+  transition: opacity 0.3s ease;
+}
+
+.lumaborder-bar-fill-top {
+  top: 0; left: 0; right: 0; height: var(--lumaborder-letterbox-top, 0px);
+}
+.lumaborder-bar-fill-bottom {
+  bottom: 0; left: 0; right: 0; height: var(--lumaborder-letterbox-bottom, 0px);
+}
+.lumaborder-bar-fill-left {
+  top: 0; bottom: 0; left: 0; width: var(--lumaborder-pillarbox-left, 0px);
+}
+.lumaborder-bar-fill-right {
+  top: 0; bottom: 0; right: 0; width: var(--lumaborder-pillarbox-right, 0px);
+}
+
+/* Banding Önleme & Donanım Hızlandırmalı Dithering Katmanı (Item 2.4) */
+.lumaborder-dither-overlay {
+  position: absolute !important;
+  top: -10% !important;
+  left: -10% !important;
+  width: 120% !important;
+  height: 120% !important;
+  pointer-events: none !important;
+  opacity: 0.045;
+  mix-blend-mode: overlay;
+  z-index: 5;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* YouTube Oynatıcı UI Akıllı Renklendirme (Dynamic Accent Tinting - Item 3.4) */
+.lumaborder-tint-active .ytp-play-progress,
+.lumaborder-tint-active .ytp-progress-bar-container .ytp-play-progress {
+  background: var(--lumaborder-accent-color, #ff0000) !important;
+}
+
+.lumaborder-tint-active .ytp-scrubber-button {
+  background: var(--lumaborder-accent-color, #ff0000) !important;
+}
+
+.lumaborder-tint-active .ytp-volume-slider-handle {
+  background: var(--lumaborder-accent-color, #ff0000) !important;
+}
+
+.lumaborder-tint-active .lumaborder-player-btn.active svg,
+.lumaborder-tint-active .lumaborder-shorts-btn.active svg {
+  fill: var(--lumaborder-accent-color, #ff9100) !important;
+  filter: drop-shadow(0 0 8px var(--lumaborder-accent-color, #ff7b00)) !important;
+}
