@@ -205,10 +205,11 @@ class PopupController {
     });
 
     // Checkbox'lar
-    const bindCheckbox = (el, key) => {
+    const bindCheckbox = (el, key, onChange) => {
       if (el) {
         el.addEventListener('change', async (e) => {
           await settingsManager.save({ [key]: e.target.checked });
+          if (onChange) onChange();
           this.notifyActiveTab();
         });
       }
@@ -327,7 +328,10 @@ class PopupController {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, { action: 'SETTINGS_UPDATED' }).catch(() => {});
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'SETTINGS_UPDATED' }, () => {
+            // Hedef sekmede content script yoksa hatayı sessizce yut
+            if (chrome.runtime.lastError) {}
+          });
         }
       });
     }
@@ -337,8 +341,10 @@ class PopupController {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.query) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const activeUrl = tabs[0]?.url || '';
-        if (!activeUrl.includes('youtube.com')) {
-          // İsteğe bağlı bilgilendirme
+        if (activeUrl && !activeUrl.includes('youtube.com')) {
+          if (this.elements.statusText) {
+            this.elements.statusText.textContent = i18n.t('notOnYoutube');
+          }
         }
       });
     }

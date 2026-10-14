@@ -126,32 +126,77 @@ export const DEFAULT_SETTINGS = {
   language: 'tr'
 };
 
+export function sanitizeSettingValue(key, value) {
+  if (value === undefined || value === null) return DEFAULT_SETTINGS[key];
+  switch (key) {
+    case 'brightness':
+    case 'spread':
+    case 'blur':
+    case 'saturation':
+    case 'contrast':
+    case 'smoothing':
+    case 'bottomFadeStrength': {
+      const num = Number(value);
+      return Number.isFinite(num) ? Math.max(0, Math.min(500, Math.round(num))) : DEFAULT_SETTINGS[key];
+    }
+    case 'targetFps': {
+      if (value === 'sync' || value === 60 || value === 30 || value === '60' || value === '30') {
+        return value === 'sync' ? 'sync' : Number(value);
+      }
+      return DEFAULT_SETTINGS.targetFps;
+    }
+    case 'biasLightingColor': {
+      if (typeof value === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value.trim())) {
+        return value.trim();
+      }
+      return DEFAULT_SETTINGS.biasLightingColor;
+    }
+    case 'biasLightingMode': {
+      return ['off', 'pause', 'always'].includes(value) ? value : 'off';
+    }
+    case 'language': {
+      return value === 'en' ? 'en' : 'tr';
+    }
+    case 'activePreset': {
+      return typeof value === 'string' ? value.slice(0, 30) : 'default';
+    }
+    default: {
+      if (typeof DEFAULT_SETTINGS[key] === 'boolean') {
+        return Boolean(value);
+      }
+      return value;
+    }
+  }
+}
+
 export class SettingsManager {
   constructor() {
     this.current = { ...DEFAULT_SETTINGS };
     this.listeners = new Set();
+    this.pendingDelta = {};
+    this.saveTimeout = null;
+    this.saveResolvers = [];
     this.initStorageListener();
   }
 
   async load() {
     return new Promise((resolve) => {
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
-        chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
-          if (chrome.runtime.lastError) {
-            chrome.storage.local.get(DEFAULT_SETTINGS, (localItems) => {
-              this.current = { ...DEFAULT_SETTINGS, ...localItems };
-              resolve(this.current);
-            });
-            return;
-          }
-          this.current = { ...DEFAULT_SETTINGS, ...items };
+        const readArea = (area, defaults) => new Promise((res) => {
+          try {
+            chrome.storage[area].get(defaults, (items) => res(chrome.runtime.lastError ? {} : (items || {})));
+          } catch (e) { res({}); }
+        });
+        // local, sync yazımı başarısız olduğunda tutulan daha yeni değerleri içerir → sync'i ezer
+        Promise.all([readArea('sync', DEFAULT_SETTINGS), readArea('local', {})]).then(([sync, local]) => {
+          this.current = this.sanitizeAll({ ...DEFAULT_SETTINGS, ...sync, ...local });
           resolve(this.current);
         });
       } else {
         try {
           const local = localStorage.getItem('lumaborder_settings');
           if (local) {
-            this.current = { ...DEFAULT_SETTINGS, ...JSON.parse(local) };
+            this.current = this.sanitizeAll({ ...DEFAULT_SETTINGS, ...JSON.parse(local) });
           }
         } catch (e) {}
         resolve(this.current);
@@ -159,23 +204,59 @@ export class SettingsManager {
     });
   }
 
+  sanitizeAll(settingsObj) {
+    const clean = {};
+    for (const key of Object.keys(DEFAULT_SETTINGS)) {
+      clean[key] = sanitizeSettingValue(key, settingsObj[key]);
+    }
+    return clean;
+  }
+
   async save(newSettings) {
-    this.current = { ...this.current, ...newSettings };
+    // Anlık olarak bellek içi durumu güncelle
+    for (const [key, val] of Object.entries(newSettings)) {
+      const sanitized = sanitizeSettingValue(key, val);
+      this.current[key] = sanitized;
+      this.pendingDelta[key] = sanitized;
+    }
+
     return new Promise((resolve) => {
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
-        chrome.storage.sync.set(this.current, () => {
-          if (chrome.runtime.lastError) {
-            chrome.storage.local.set(this.current, () => resolve(this.current));
-            return;
-          }
-          resolve(this.current);
-        });
-      } else {
+      this.saveResolvers.push(resolve);
+
+      if (this.saveTimeout) clearTimeout(this.saveTimeout);
+
+      this.saveTimeout = setTimeout(() => {
+        const deltaToSave = { ...this.pendingDelta };
+        this.pendingDelta = {};
+        const resolvers = [...this.saveResolvers];
+        this.saveResolvers = [];
+        const done = () => resolvers.forEach(r => r(this.current));
+
         try {
-          localStorage.setItem('lumaborder_settings', JSON.stringify(this.current));
-        } catch (e) {}
-        resolve(this.current);
-      }
+          if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
+            // Eklenti yeniden yüklendiyse (context invalidated) yazma deneme, promise'i çöz
+            if (!chrome.runtime?.id) return done();
+
+            chrome.storage.sync.set(deltaToSave, () => {
+              if (chrome.runtime.lastError) {
+                // sync yazılamadı (kota vb.) → local kazanır (load() local'i sync üzerine bindirir)
+                chrome.storage.local.set(deltaToSave, done);
+              } else {
+                // sync güncel: eski local override'ı temizle ki load() bayat değer okumasın
+                chrome.storage.local.remove(Object.keys(deltaToSave), done);
+              }
+            });
+          } else {
+            try {
+              localStorage.setItem('lumaborder_settings', JSON.stringify(this.current));
+            } catch (e) {}
+            done();
+          }
+        } catch (err) {
+          console.warn('[LumaBorder] Ayarlar kaydedilemedi:', err);
+          done();
+        }
+      }, 100);
     });
   }
 
@@ -204,8 +285,13 @@ export class SettingsManager {
         if (areaName === 'sync' || areaName === 'local') {
           let updated = false;
           for (const key of Object.keys(changes)) {
-            if (this.current[key] !== changes[key].newValue) {
-              this.current[key] = changes[key].newValue;
+            if (!(key in DEFAULT_SETTINGS)) continue;
+            // local.remove (sync'e geçiş temizliği) bir sıfırlama değildir; yok say
+            if (changes[key].newValue === undefined && areaName === 'local') continue;
+            const rawVal = changes[key].newValue;
+            const cleanVal = sanitizeSettingValue(key, rawVal !== undefined ? rawVal : DEFAULT_SETTINGS[key]);
+            if (this.current[key] !== cleanVal) {
+              this.current[key] = cleanVal;
               updated = true;
             }
           }

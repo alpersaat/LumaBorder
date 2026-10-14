@@ -1,13 +1,14 @@
 {
   "name": "lumaborder",
   "version": "2.2.0",
-  "description": "YouTube için dinamik ve sinematik ortam ışığı (ambient light) uzantısı",
+  "description": "YouTube iÃ§in dinamik ve sinematik ortam Ä±ÅŸÄ±ÄŸÄ± (ambient light) uzantÄ±sÄ±",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.js",
     "dev": "node scripts/build.js --watch",
     "watch": "node scripts/build.js --watch",
-    "package": "node scripts/package.js"
+    "package": "node scripts/package.js",
+    "test": "node --test tests/settings.test.js"
   },
   "keywords": [
     "youtube",
@@ -21,3 +22,4 @@
     "esbuild": "^0.28.2"
   }
 }
+

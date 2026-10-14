@@ -328,31 +328,76 @@
     activePreset: "default",
     language: "tr"
   };
+  function sanitizeSettingValue(key, value) {
+    if (value === void 0 || value === null) return DEFAULT_SETTINGS[key];
+    switch (key) {
+      case "brightness":
+      case "spread":
+      case "blur":
+      case "saturation":
+      case "contrast":
+      case "smoothing":
+      case "bottomFadeStrength": {
+        const num = Number(value);
+        return Number.isFinite(num) ? Math.max(0, Math.min(500, Math.round(num))) : DEFAULT_SETTINGS[key];
+      }
+      case "targetFps": {
+        if (value === "sync" || value === 60 || value === 30 || value === "60" || value === "30") {
+          return value === "sync" ? "sync" : Number(value);
+        }
+        return DEFAULT_SETTINGS.targetFps;
+      }
+      case "biasLightingColor": {
+        if (typeof value === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value.trim())) {
+          return value.trim();
+        }
+        return DEFAULT_SETTINGS.biasLightingColor;
+      }
+      case "biasLightingMode": {
+        return ["off", "pause", "always"].includes(value) ? value : "off";
+      }
+      case "language": {
+        return value === "en" ? "en" : "tr";
+      }
+      case "activePreset": {
+        return typeof value === "string" ? value.slice(0, 30) : "default";
+      }
+      default: {
+        if (typeof DEFAULT_SETTINGS[key] === "boolean") {
+          return Boolean(value);
+        }
+        return value;
+      }
+    }
+  }
   var SettingsManager = class {
     constructor() {
       this.current = { ...DEFAULT_SETTINGS };
       this.listeners = /* @__PURE__ */ new Set();
+      this.pendingDelta = {};
+      this.saveTimeout = null;
+      this.saveResolvers = [];
       this.initStorageListener();
     }
     async load() {
       return new Promise((resolve) => {
         if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.sync) {
-          chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
-            if (chrome.runtime.lastError) {
-              chrome.storage.local.get(DEFAULT_SETTINGS, (localItems) => {
-                this.current = { ...DEFAULT_SETTINGS, ...localItems };
-                resolve(this.current);
-              });
-              return;
+          const readArea = (area, defaults) => new Promise((res) => {
+            try {
+              chrome.storage[area].get(defaults, (items) => res(chrome.runtime.lastError ? {} : items || {}));
+            } catch (e) {
+              res({});
             }
-            this.current = { ...DEFAULT_SETTINGS, ...items };
+          });
+          Promise.all([readArea("sync", DEFAULT_SETTINGS), readArea("local", {})]).then(([sync, local]) => {
+            this.current = this.sanitizeAll({ ...DEFAULT_SETTINGS, ...sync, ...local });
             resolve(this.current);
           });
         } else {
           try {
             const local = localStorage.getItem("lumaborder_settings");
             if (local) {
-              this.current = { ...DEFAULT_SETTINGS, ...JSON.parse(local) };
+              this.current = this.sanitizeAll({ ...DEFAULT_SETTINGS, ...JSON.parse(local) });
             }
           } catch (e) {
           }
@@ -360,24 +405,50 @@
         }
       });
     }
+    sanitizeAll(settingsObj) {
+      const clean = {};
+      for (const key of Object.keys(DEFAULT_SETTINGS)) {
+        clean[key] = sanitizeSettingValue(key, settingsObj[key]);
+      }
+      return clean;
+    }
     async save(newSettings) {
-      this.current = { ...this.current, ...newSettings };
+      for (const [key, val] of Object.entries(newSettings)) {
+        const sanitized = sanitizeSettingValue(key, val);
+        this.current[key] = sanitized;
+        this.pendingDelta[key] = sanitized;
+      }
       return new Promise((resolve) => {
-        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.sync) {
-          chrome.storage.sync.set(this.current, () => {
-            if (chrome.runtime.lastError) {
-              chrome.storage.local.set(this.current, () => resolve(this.current));
-              return;
-            }
-            resolve(this.current);
-          });
-        } else {
+        this.saveResolvers.push(resolve);
+        if (this.saveTimeout) clearTimeout(this.saveTimeout);
+        this.saveTimeout = setTimeout(() => {
+          const deltaToSave = { ...this.pendingDelta };
+          this.pendingDelta = {};
+          const resolvers = [...this.saveResolvers];
+          this.saveResolvers = [];
+          const done = () => resolvers.forEach((r) => r(this.current));
           try {
-            localStorage.setItem("lumaborder_settings", JSON.stringify(this.current));
-          } catch (e) {
+            if (typeof chrome !== "undefined" && chrome.storage?.sync) {
+              if (!chrome.runtime?.id) return done();
+              chrome.storage.sync.set(deltaToSave, () => {
+                if (chrome.runtime.lastError) {
+                  chrome.storage.local.set(deltaToSave, done);
+                } else {
+                  chrome.storage.local.remove(Object.keys(deltaToSave), done);
+                }
+              });
+            } else {
+              try {
+                localStorage.setItem("lumaborder_settings", JSON.stringify(this.current));
+              } catch (e) {
+              }
+              done();
+            }
+          } catch (err) {
+            console.warn("[LumaBorder] Ayarlar kaydedilemedi:", err);
+            done();
           }
-          resolve(this.current);
-        }
+        }, 100);
       });
     }
     applyPreset(presetKey) {
@@ -403,8 +474,12 @@
           if (areaName === "sync" || areaName === "local") {
             let updated = false;
             for (const key of Object.keys(changes)) {
-              if (this.current[key] !== changes[key].newValue) {
-                this.current[key] = changes[key].newValue;
+              if (!(key in DEFAULT_SETTINGS)) continue;
+              if (changes[key].newValue === void 0 && areaName === "local") continue;
+              const rawVal = changes[key].newValue;
+              const cleanVal = sanitizeSettingValue(key, rawVal !== void 0 ? rawVal : DEFAULT_SETTINGS[key]);
+              if (this.current[key] !== cleanVal) {
+                this.current[key] = cleanVal;
                 updated = true;
               }
             }
@@ -451,6 +526,8 @@
       this.animationFrameId = null;
       this.videoCallbackId = null;
       this.lastRenderTime = 0;
+      this.destroyed = false;
+      this.workerBlobUrl = null;
       this.worker = null;
       this.isWorkerReady = false;
       this.isAnalyzingInWorker = false;
@@ -518,38 +595,58 @@
         });
       }
     }
-    initWorker() {
+    async initWorker() {
       if (!this.settings.workerRender || typeof Worker === "undefined") return;
       try {
-        const workerUrl = typeof chrome !== "undefined" && chrome.runtime?.getURL ? chrome.runtime.getURL("src/render-worker.js") : null;
-        if (workerUrl) {
-          this.worker = new Worker(workerUrl);
-          this.worker.onmessage = (e) => {
-            const { type, crop } = e.data || {};
-            if (type === "READY") {
-              this.isWorkerReady = true;
-            } else if (type === "ANALYSIS_RESULT") {
-              if (crop) {
-                this.letterboxCrop = crop;
-              }
-              this.isAnalyzingInWorker = false;
+        if (typeof chrome === "undefined" || !chrome.runtime?.getURL) return;
+        const res = await fetch(chrome.runtime.getURL("src/render-worker.js"));
+        const code = await res.text();
+        if (this.destroyed) return;
+        this.workerBlobUrl = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+        this.worker = new Worker(this.workerBlobUrl);
+        this.worker.onmessage = (e) => {
+          const { type, crop } = e.data || {};
+          if (type === "READY") {
+            this.isWorkerReady = true;
+          } else if (type === "ANALYSIS_RESULT") {
+            if (crop) {
+              this.letterboxCrop = crop;
             }
-          };
-          this.worker.onerror = () => {
-            this.worker = null;
-            this.isWorkerReady = false;
             this.isAnalyzingInWorker = false;
-          };
-          this.worker.postMessage({ type: "INIT", data: {} });
-        }
+          }
+        };
+        this.worker.onerror = (e) => {
+          this.warnOnce("worker", e && e.message);
+          this.disposeWorker();
+        };
+        this.worker.postMessage({ type: "INIT", data: {} });
       } catch (e) {
-        this.worker = null;
-        this.isWorkerReady = false;
+        this.warnOnce("worker-init", e);
+        this.disposeWorker();
       }
+    }
+    disposeWorker() {
+      if (this.worker) {
+        try {
+          this.worker.terminate();
+        } catch (e) {
+        }
+      }
+      if (this.workerBlobUrl) {
+        try {
+          URL.revokeObjectURL(this.workerBlobUrl);
+        } catch (e) {
+        }
+      }
+      this.worker = null;
+      this.workerBlobUrl = null;
+      this.isWorkerReady = false;
+      this.isAnalyzingInWorker = false;
     }
     initBattery() {
       if (typeof navigator !== "undefined" && "getBattery" in navigator) {
         navigator.getBattery().then((battery) => {
+          if (this.destroyed) return;
           this.battery = battery;
           const updateBatteryStatus = () => {
             const charging = battery.charging;
@@ -594,7 +691,19 @@
         if (this.onPlay) this.video.removeEventListener("play", this.onPlay);
         if (this.onPause) this.video.removeEventListener("pause", this.onPause);
         if (this.onEnded) this.video.removeEventListener("ended", this.onEnded);
+        if (this.onLoadedMetadata) this.video.removeEventListener("loadedmetadata", this.onLoadedMetadata);
+        if (this.onEmptied) this.video.removeEventListener("emptied", this.onEmptied);
       }
+      if (this.onVisibilityChange) {
+        document.removeEventListener("visibilitychange", this.onVisibilityChange);
+        this.onVisibilityChange = null;
+      }
+    }
+    warnOnce(tag, err) {
+      this._warned = this._warned || {};
+      if (this._warned[tag]) return;
+      this._warned[tag] = true;
+      console.warn(`[LumaBorder] ${tag} hatas\u0131:`, err);
     }
     bindEvents() {
       this.unbindVideoEvents();
@@ -606,6 +715,15 @@
         this.stop();
       };
       this.onEnded = () => this.stop();
+      this.onLoadedMetadata = () => {
+        this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
+        if (!this.video.paused && !this.video.ended && this.video.readyState >= 2) {
+          this.start();
+        }
+      };
+      this.onEmptied = () => {
+        this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
+      };
       this.onVisibilityChange = () => {
         if (document.hidden) {
           this.stop();
@@ -616,6 +734,8 @@
       this.video.addEventListener("play", this.onPlay);
       this.video.addEventListener("pause", this.onPause);
       this.video.addEventListener("ended", this.onEnded);
+      this.video.addEventListener("loadedmetadata", this.onLoadedMetadata);
+      this.video.addEventListener("emptied", this.onEmptied);
       document.addEventListener("visibilitychange", this.onVisibilityChange);
       if (!this.video.paused && !this.video.ended && this.video.readyState >= 2) {
         this.start();
@@ -702,7 +822,7 @@
       }
     }
     start() {
-      if (this.isRunning || !this.settings.enabled) return;
+      if (this.destroyed || this.isRunning || !this.settings.enabled) return;
       if (this.settings.biasLightingMode === "always") {
         this.drawBiasLighting();
         return;
@@ -722,9 +842,10 @@
       }
     }
     renderLoop() {
-      if (!this.isRunning || !this.settings.enabled) return;
+      if (this.destroyed || !this.isRunning || !this.settings.enabled) return;
       if (this.settings.biasLightingMode === "always") {
         this.drawBiasLighting();
+        this.stop();
         return;
       }
       const scheduleNext = () => {
@@ -750,7 +871,10 @@
         }
         this.lastRenderTime = now;
       }
-      this.drawFrame();
+      try {
+        this.drawFrame();
+      } catch (err) {
+      }
       scheduleNext();
     }
     detectLetterbox() {
@@ -758,6 +882,9 @@
       const checkPillarbox = Boolean(this.settings.pillarboxDetection);
       if (!checkLetterbox && !checkPillarbox || !this.analysisCtx) {
         this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
+        return;
+      }
+      if (!this.video || this.video.videoWidth <= 0 || this.video.videoHeight <= 0) {
         return;
       }
       const now = performance.now();
@@ -768,32 +895,58 @@
         this.isAnalyzingInWorker = true;
         const resizeW = this.isShorts ? 18 : 32;
         const resizeH = this.isShorts ? 32 : 18;
-        createImageBitmap(this.video, { resizeWidth: resizeW, resizeHeight: resizeH, resizeQuality: "low" }).then((bitmap) => {
-          this.worker.postMessage({
-            type: "ANALYZE_PIXELS",
-            data: {
-              bitmap,
-              checkLetterbox,
-              checkPillarbox,
-              isShorts: this.isShorts
+        try {
+          createImageBitmap(this.video, { resizeWidth: resizeW, resizeHeight: resizeH, resizeQuality: "low" }).then((bitmap) => {
+            if (!this.worker || !this.isWorkerReady) {
+              if (bitmap && typeof bitmap.close === "function") bitmap.close();
+              this.isAnalyzingInWorker = false;
+              return;
             }
-          }, [bitmap]);
-        }).catch(() => {
+            this.worker.postMessage({
+              type: "ANALYZE_PIXELS",
+              data: {
+                bitmap,
+                checkLetterbox,
+                checkPillarbox,
+                isShorts: this.isShorts
+              }
+            }, [bitmap]);
+          }).catch(() => {
+            this.isAnalyzingInWorker = false;
+            this.detectLetterboxMainThread(checkLetterbox, checkPillarbox);
+          });
+        } catch (bitmapSyncErr) {
           this.isAnalyzingInWorker = false;
           this.detectLetterboxMainThread(checkLetterbox, checkPillarbox);
-        });
+        }
         return;
       }
       this.detectLetterboxMainThread(checkLetterbox, checkPillarbox);
     }
     detectLetterboxMainThread(checkLetterbox, checkPillarbox) {
-      if (!this.analysisCtx) return;
+      if (!this.analysisCtx || !this.video || this.video.videoWidth <= 0 || this.video.videoHeight <= 0) return;
       try {
         const w = this.analysisCanvas.width;
         const h = this.analysisCanvas.height;
         this.analysisCtx.drawImage(this.video, 0, 0, w, h);
         const imgData = this.analysisCtx.getImageData(0, 0, w, h).data;
         const threshold = 18;
+        const centerX = Math.floor(w / 2);
+        const centerY = Math.floor(h / 2);
+        let centerLumSum = 0;
+        let sampleCount = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const idx = ((centerY + dy) * w + (centerX + dx)) * 4;
+            centerLumSum += 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+            sampleCount++;
+          }
+        }
+        const avgCenterLum = centerLumSum / sampleCount;
+        if (avgCenterLum <= threshold) {
+          this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
+          return;
+        }
         let cropTop = 0;
         let cropBottom = 0;
         let cropLeft = 0;
@@ -869,10 +1022,14 @@
       this.detectLetterbox();
       const vw = this.video.videoWidth || this.canvasWidth;
       const vh = this.video.videoHeight || this.canvasHeight;
-      const sx = vw * this.letterboxCrop.left;
-      const sy = vh * this.letterboxCrop.top;
-      const sw = Math.max(10, vw * (1 - this.letterboxCrop.left - this.letterboxCrop.right));
-      const sh = Math.max(10, vh * (1 - this.letterboxCrop.top - this.letterboxCrop.bottom));
+      const cropL = Math.max(0, Math.min(0.4, this.letterboxCrop.left));
+      const cropR = Math.max(0, Math.min(0.4, this.letterboxCrop.right));
+      const cropT = Math.max(0, Math.min(0.4, this.letterboxCrop.top));
+      const cropB = Math.max(0, Math.min(0.4, this.letterboxCrop.bottom));
+      const sx = Math.max(0, Math.floor(vw * cropL));
+      const sy = Math.max(0, Math.floor(vh * cropT));
+      const sw = Math.min(vw - sx, Math.max(10, Math.floor(vw * (1 - cropL - cropR))));
+      const sh = Math.min(vh - sy, Math.max(10, Math.floor(vh * (1 - cropT - cropB))));
       try {
         this.ctx.drawImage(
           this.video,
@@ -899,6 +1056,7 @@
           );
         }
       } catch (err) {
+        this.warnOnce("drawFrame", err);
       }
     }
     updateTarget(videoElem, playerElem) {
@@ -943,18 +1101,10 @@
       }
     }
     destroy() {
+      this.destroyed = true;
       this.stop();
       this.unbindVideoEvents();
-      if (this.onVisibilityChange) {
-        document.removeEventListener("visibilitychange", this.onVisibilityChange);
-      }
-      if (this.worker) {
-        try {
-          this.worker.terminate();
-        } catch (e) {
-        }
-        this.worker = null;
-      }
+      this.disposeWorker();
       if (this.battery && this.batteryUpdateHandler) {
         try {
           this.battery.removeEventListener("chargingchange", this.batteryUpdateHandler);
@@ -1184,10 +1334,16 @@
       }
     }
     setupEventListeners() {
+      let hoverRaf = null;
       this.onPlayerHover = () => {
-        if (!this.button || !this.button.isConnected) {
-          this.mountButton();
-        }
+        if (this.button && this.button.isConnected) return;
+        if (hoverRaf) return;
+        hoverRaf = requestAnimationFrame(() => {
+          hoverRaf = null;
+          if (!this.button || !this.button.isConnected) {
+            this.mountButton();
+          }
+        });
       };
       if (this.player) {
         this.player.addEventListener("mouseenter", this.onPlayerHover, { passive: true });
@@ -1225,6 +1381,10 @@
     }
     closeMenu() {
       if (!this.isOpen) return;
+      if (this.tabAbortController) {
+        this.tabAbortController.abort();
+        this.tabAbortController = null;
+      }
       if (this.menuOverlay) {
         this.menuOverlay.remove();
         this.menuOverlay = null;
@@ -1277,7 +1437,10 @@
       this.menuOverlay.addEventListener("keydown", (e) => e.stopPropagation());
       this.menuOverlay.addEventListener("keyup", (e) => e.stopPropagation());
       const isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player?.closest?.("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
-      if (isShorts) {
+      const fullscreenElem = document.fullscreenElement;
+      if (fullscreenElem) {
+        fullscreenElem.appendChild(this.menuOverlay);
+      } else if (isShorts) {
         this.menuOverlay.classList.add("lumaborder-shorts-menu");
         document.body.appendChild(this.menuOverlay);
       } else {
@@ -1412,7 +1575,7 @@
             <button class="lumaborder-color-dot ${s.biasLightingColor === "#00e5ff" ? "active" : ""}" data-color="#00e5ff" title="${i18n.t("biasColorCyber")}" style="background: #00e5ff;"></button>
             <button class="lumaborder-color-dot ${s.biasLightingColor === "#ff5e00" ? "active" : ""}" data-color="#ff5e00" title="${i18n.t("biasColorSunset")}" style="background: #ff5e00;"></button>
             <button class="lumaborder-color-dot ${s.biasLightingColor === "#bd00ff" ? "active" : ""}" data-color="#bd00ff" title="${i18n.t("biasColorPurple")}" style="background: #bd00ff;"></button>
-            <input type="color" id="bias-custom-color" class="lumaborder-color-picker" value="${s.biasLightingColor || "#ffe4b5"}" title="${i18n.t("biasColorCustom")}">
+            <input type="color" id="bias-custom-color" class="lumaborder-color-picker" value="${typeof s.biasLightingColor === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.biasLightingColor.trim()) ? s.biasLightingColor.trim() : "#ffe4b5"}" title="${i18n.t("biasColorCustom")}">
           </div>
         </div>
       `;
@@ -1573,6 +1736,11 @@
     }
     bindTabContentEvents() {
       if (!this.menuOverlay) return;
+      if (this.tabAbortController) {
+        this.tabAbortController.abort();
+      }
+      this.tabAbortController = new AbortController();
+      const { signal } = this.tabAbortController;
       const masterToggle = this.menuOverlay.querySelector("#lumaborder-master-toggle");
       if (masterToggle) {
         masterToggle.addEventListener("change", async (e) => {
@@ -1580,7 +1748,7 @@
           await this.settingsManager.save({ enabled });
           this.ambientEngine.applySettings({ enabled });
           this.updateButtonState();
-        });
+        }, { signal });
       }
       const bindSlider = (id, key, unit = "%") => {
         const slider = this.menuOverlay.querySelector(`#rng-${id}`);
@@ -1590,11 +1758,11 @@
             const val = parseInt(e.target.value, 10);
             valLabel.textContent = `${val}${unit}`;
             this.ambientEngine.applySettings({ [key]: val });
-          });
+          }, { signal });
           slider.addEventListener("change", async (e) => {
             const val = parseInt(e.target.value, 10);
             await this.settingsManager.save({ [key]: val, activePreset: "custom" });
-          });
+          }, { signal });
         }
       };
       bindSlider("brightness", "brightness", "%");
@@ -1611,7 +1779,7 @@
           await this.settingsManager.applyPreset(presetKey);
           this.ambientEngine.applySettings(this.settingsManager.current);
           this.renderMenu();
-        });
+        }, { signal });
       });
       const bindCheckbox = (id, key, onChangeExtra) => {
         const chk = this.menuOverlay.querySelector(`#chk-${id}`);
@@ -1620,7 +1788,7 @@
             await this.settingsManager.save({ [key]: e.target.checked });
             this.ambientEngine.applySettings({ [key]: e.target.checked });
             if (onChangeExtra) onChangeExtra(e.target.checked);
-          });
+          }, { signal });
         }
       };
       bindCheckbox("duallayer", "dualLayerGlow");
@@ -1644,10 +1812,10 @@
           if (valFps) valFps.textContent = fps === "sync" ? i18n.t("fpsSync") : `${fps} FPS`;
           await this.settingsManager.save({ targetFps: fps, activePreset: "custom" });
           this.ambientEngine.applySettings({ targetFps: fps });
-        });
+        }, { signal });
       });
       this.updateBatteryCard(this.ambientEngine?.batteryInfo);
-      const biasModeBtns = this.menuOverlay.querySelectorAll(".lumaborder-mode-pill");
+      const biasModeBtns = this.menuOverlay.querySelectorAll(".lumaborder-bias-modes .lumaborder-mode-pill");
       biasModeBtns.forEach((btn) => {
         btn.addEventListener("click", async () => {
           const mode = btn.dataset.biasmode;
@@ -1656,7 +1824,7 @@
           this.ambientEngine.applySettings({ biasLightingMode: mode });
           const palette = this.menuOverlay.querySelector("#bias-color-palette");
           if (palette) palette.style.display = mode === "off" ? "none" : "block";
-        });
+        }, { signal });
       });
       const colorDots = this.menuOverlay.querySelectorAll(".lumaborder-color-dot");
       colorDots.forEach((dot) => {
@@ -1667,17 +1835,17 @@
           this.ambientEngine.applySettings({ biasLightingColor: color });
           const picker = this.menuOverlay.querySelector("#bias-custom-color");
           if (picker) picker.value = color;
-        });
+        }, { signal });
       });
       const customColor = this.menuOverlay.querySelector("#bias-custom-color");
       if (customColor) {
         customColor.addEventListener("input", (e) => {
           this.ambientEngine.applySettings({ biasLightingColor: e.target.value });
-        });
+        }, { signal });
         customColor.addEventListener("change", async (e) => {
           await this.settingsManager.save({ biasLightingColor: e.target.value });
           colorDots.forEach((d) => d.classList.remove("active"));
-        });
+        }, { signal });
       }
     }
     updateBatteryCard(info) {
@@ -1781,6 +1949,8 @@
         this.currentPlayer = null;
         this.currentReel = null;
         this.initTimeout = null;
+        this.retryTimeout = null;
+        this.observer = null;
         this.init();
       }
       async init() {
@@ -1794,6 +1964,17 @@
             if (this.ambientEngine) this.ambientEngine.applySettings(newSettings);
             if (this.playerUI) this.playerUI.updateButtonState();
           });
+          if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+            chrome.runtime.onMessage.addListener((msg) => {
+              if (msg && msg.action === "SETTINGS_UPDATED") {
+                settingsManager.load().then((updated) => {
+                  i18n.setLanguage(updated.language || "tr");
+                  if (this.ambientEngine) this.ambientEngine.applySettings(updated);
+                  if (this.playerUI) this.playerUI.updateButtonState();
+                });
+              }
+            });
+          }
           this.checkAndBootstrap();
         } catch (err) {
           console.warn("[LumaBorder] Ba\u015Flatma hatas\u0131:", err);
@@ -1803,6 +1984,11 @@
         window.addEventListener("yt-navigate-finish", () => this.scheduleBootstrap(150));
         window.addEventListener("spfdone", () => this.scheduleBootstrap(150));
         window.addEventListener("popstate", () => this.scheduleBootstrap(150));
+        document.addEventListener("loadedmetadata", (e) => {
+          if (e.target && e.target.tagName === "VIDEO") {
+            this.scheduleBootstrap(100);
+          }
+        }, true);
         window.addEventListener("wheel", () => {
           if (location.pathname.startsWith("/shorts")) {
             this.scheduleBootstrap(100);
@@ -1821,8 +2007,12 @@
           }
         }, { passive: true });
         document.addEventListener("play", (e) => {
-          if (location.pathname.startsWith("/shorts") && e.target && e.target.tagName === "VIDEO") {
-            this.handleShortsVideoPlay(e.target);
+          if (e.target && e.target.tagName === "VIDEO") {
+            if (location.pathname.startsWith("/shorts")) {
+              this.handleShortsVideoPlay(e.target);
+            } else {
+              this.scheduleBootstrap(100);
+            }
           }
         }, true);
       }
@@ -1841,22 +2031,28 @@
       }
       observeDOM() {
         try {
+          let observerDebounce = null;
           const observer = new MutationObserver(() => {
-            const isShorts = location.pathname.startsWith("/shorts");
-            if (isShorts) {
-              const activeReel = document.querySelector("ytd-reel-video-renderer[is-active]");
-              const video = activeReel ? activeReel.querySelector("video") : document.querySelector("ytd-shorts video");
-              if (video && (video !== this.currentVideo || activeReel !== this.currentReel)) {
-                this.scheduleBootstrap(100);
+            if (observerDebounce) return;
+            observerDebounce = setTimeout(() => {
+              observerDebounce = null;
+              const isShorts = location.pathname.startsWith("/shorts");
+              if (isShorts) {
+                const activeReel = document.querySelector("ytd-reel-video-renderer[is-active]");
+                const video = activeReel ? activeReel.querySelector("video") : document.querySelector("ytd-shorts video");
+                if (video && (video !== this.currentVideo || activeReel !== this.currentReel)) {
+                  this.scheduleBootstrap(100);
+                }
+              } else {
+                const video = document.querySelector("video.html5-main-video") || document.querySelector("video");
+                if (video && video !== this.currentVideo) {
+                  this.scheduleBootstrap(150);
+                }
               }
-            } else {
-              const video = document.querySelector("video.html5-main-video") || document.querySelector("video");
-              if (video && video !== this.currentVideo) {
-                this.scheduleBootstrap(150);
-              }
-            }
+            }, 150);
           });
-          const target = document.body || document.documentElement;
+          const target = document.querySelector("ytd-page-manager") || document.body || document.documentElement;
+          this.observer = observer;
           if (target) {
             observer.observe(target, {
               childList: true,
@@ -1970,7 +2166,7 @@
         }
         return { video, player, activeReel };
       }
-      checkAndBootstrap() {
+      checkAndBootstrap(attempt = 0) {
         const isWatch = location.pathname.startsWith("/watch") || location.pathname.startsWith("/embed/");
         const isShorts = location.pathname.startsWith("/shorts");
         if (!isWatch && !isShorts) {
@@ -1979,9 +2175,10 @@
         }
         const { video, player, activeReel } = this.findTargetVideoAndPlayer(isShorts);
         if (!video || !player) {
-          setTimeout(() => {
-            this.retryBootstrap(isShorts);
-          }, 300);
+          if (attempt < 10) {
+            clearTimeout(this.retryTimeout);
+            this.retryTimeout = setTimeout(() => this.checkAndBootstrap(attempt + 1), 300);
+          }
           return;
         }
         if (this.currentVideo === video && this.currentPlayer === player && this.ambientEngine && (isShorts ? this.currentReel === activeReel : true)) {
@@ -1989,12 +2186,6 @@
         }
         this.currentReel = activeReel;
         this.setup(video, player);
-      }
-      retryBootstrap(isShorts) {
-        const { video, player } = this.findTargetVideoAndPlayer(isShorts);
-        if (video && player && (video !== this.currentVideo || player !== this.currentPlayer)) {
-          this.setup(video, player);
-        }
       }
       setup(video, player) {
         if (!video || !player) return;
@@ -2016,6 +2207,10 @@
         }
       }
       teardown() {
+        clearTimeout(this.retryTimeout);
+        clearTimeout(this.initTimeout);
+        this.retryTimeout = null;
+        this.initTimeout = null;
         if (this.ambientEngine) {
           try {
             this.ambientEngine.destroy();

@@ -29,6 +29,8 @@ export class AmbientEngine {
     this.lastRenderTime = 0;
 
     // Worker & OffscreenCanvas Render
+    this.destroyed = false;
+    this.workerBlobUrl = null;
     this.worker = null;
     this.isWorkerReady = false;
     this.isAnalyzingInWorker = false;
@@ -117,41 +119,57 @@ export class AmbientEngine {
     }
   }
 
-  initWorker() {
+  async initWorker() {
     if (!this.settings.workerRender || typeof Worker === 'undefined') return;
     try {
-      const workerUrl = (typeof chrome !== 'undefined' && chrome.runtime?.getURL)
-        ? chrome.runtime.getURL('src/render-worker.js')
-        : null;
-      if (workerUrl) {
-        this.worker = new Worker(workerUrl);
-        this.worker.onmessage = (e) => {
-          const { type, crop } = e.data || {};
-          if (type === 'READY') {
-            this.isWorkerReady = true;
-          } else if (type === 'ANALYSIS_RESULT') {
-            if (crop) {
-              this.letterboxCrop = crop;
-            }
-            this.isAnalyzingInWorker = false;
+      if (typeof chrome === 'undefined' || !chrome.runtime?.getURL) return;
+      // content script youtube.com origin'inde çalışır; chrome-extension:// URL'i doğrudan Worker olamaz.
+      // Kodu fetch ile alıp Blob URL üzerinden başlatıyoruz (sayfa CSP'si engellerse fallback devreye girer).
+      const res = await fetch(chrome.runtime.getURL('src/render-worker.js'));
+      const code = await res.text();
+      if (this.destroyed) return;
+
+      this.workerBlobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+      this.worker = new Worker(this.workerBlobUrl);
+      this.worker.onmessage = (e) => {
+        const { type, crop } = e.data || {};
+        if (type === 'READY') {
+          this.isWorkerReady = true;
+        } else if (type === 'ANALYSIS_RESULT') {
+          if (crop) {
+            this.letterboxCrop = crop;
           }
-        };
-        this.worker.onerror = () => {
-          this.worker = null;
-          this.isWorkerReady = false;
           this.isAnalyzingInWorker = false;
-        };
-        this.worker.postMessage({ type: 'INIT', data: {} });
-      }
+        }
+      };
+      this.worker.onerror = (e) => {
+        this.warnOnce('worker', e && e.message);
+        this.disposeWorker();
+      };
+      this.worker.postMessage({ type: 'INIT', data: {} });
     } catch (e) {
-      this.worker = null;
-      this.isWorkerReady = false;
+      this.warnOnce('worker-init', e);
+      this.disposeWorker();
     }
+  }
+
+  disposeWorker() {
+    if (this.worker) {
+      try { this.worker.terminate(); } catch (e) {}
+    }
+    if (this.workerBlobUrl) {
+      try { URL.revokeObjectURL(this.workerBlobUrl); } catch (e) {}
+    }
+    this.worker = null;
+    this.workerBlobUrl = null;
+    this.isWorkerReady = false;
+    this.isAnalyzingInWorker = false;
   }
 
   initBattery() {
     if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
       navigator.getBattery().then((battery) => {
+        if (this.destroyed) return;
         this.battery = battery;
         const updateBatteryStatus = () => {
           const charging = battery.charging;
@@ -198,7 +216,20 @@ export class AmbientEngine {
       if (this.onPlay) this.video.removeEventListener('play', this.onPlay);
       if (this.onPause) this.video.removeEventListener('pause', this.onPause);
       if (this.onEnded) this.video.removeEventListener('ended', this.onEnded);
+      if (this.onLoadedMetadata) this.video.removeEventListener('loadedmetadata', this.onLoadedMetadata);
+      if (this.onEmptied) this.video.removeEventListener('emptied', this.onEmptied);
     }
+    if (this.onVisibilityChange) {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange);
+      this.onVisibilityChange = null;
+    }
+  }
+
+  warnOnce(tag, err) {
+    this._warned = this._warned || {};
+    if (this._warned[tag]) return;
+    this._warned[tag] = true;
+    console.warn(`[LumaBorder] ${tag} hatası:`, err);
   }
 
   bindEvents() {
@@ -212,6 +243,17 @@ export class AmbientEngine {
       this.stop();
     };
     this.onEnded = () => this.stop();
+    this.onLoadedMetadata = () => {
+      // Yeni video yüklendiğinde (SPA / playlist geçişleri) kırpmayı sıfırla ve yeniden hesapla
+      this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
+      if (!this.video.paused && !this.video.ended && this.video.readyState >= 2) {
+        this.start();
+      }
+    };
+    this.onEmptied = () => {
+      this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
+    };
+
     this.onVisibilityChange = () => {
       if (document.hidden) {
         this.stop();
@@ -223,6 +265,8 @@ export class AmbientEngine {
     this.video.addEventListener('play', this.onPlay);
     this.video.addEventListener('pause', this.onPause);
     this.video.addEventListener('ended', this.onEnded);
+    this.video.addEventListener('loadedmetadata', this.onLoadedMetadata);
+    this.video.addEventListener('emptied', this.onEmptied);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
 
     if (!this.video.paused && !this.video.ended && this.video.readyState >= 2) {
@@ -332,7 +376,7 @@ export class AmbientEngine {
   }
 
   start() {
-    if (this.isRunning || !this.settings.enabled) return;
+    if (this.destroyed || this.isRunning || !this.settings.enabled) return;
     if (this.settings.biasLightingMode === 'always') {
       this.drawBiasLighting();
       return;
@@ -354,10 +398,11 @@ export class AmbientEngine {
   }
 
   renderLoop() {
-    if (!this.isRunning || !this.settings.enabled) return;
+    if (this.destroyed || !this.isRunning || !this.settings.enabled) return;
 
     if (this.settings.biasLightingMode === 'always') {
       this.drawBiasLighting();
+      this.stop(); // isRunning=false: mod değişince start() yeniden çalışabilsin
       return;
     }
 
@@ -391,7 +436,9 @@ export class AmbientEngine {
       this.lastRenderTime = now;
     }
 
-    this.drawFrame();
+    try {
+      this.drawFrame();
+    } catch (err) {}
     scheduleNext();
   }
 
@@ -401,6 +448,11 @@ export class AmbientEngine {
 
     if ((!checkLetterbox && !checkPillarbox) || !this.analysisCtx) {
       this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
+      return;
+    }
+
+    // Video henüz hazır değilse veya sıfır boyutluysa (reklam/yükleme esnası) bekle
+    if (!this.video || this.video.videoWidth <= 0 || this.video.videoHeight <= 0) {
       return;
     }
 
@@ -418,22 +470,32 @@ export class AmbientEngine {
       this.isAnalyzingInWorker = true;
       const resizeW = this.isShorts ? 18 : 32;
       const resizeH = this.isShorts ? 32 : 18;
-      createImageBitmap(this.video, { resizeWidth: resizeW, resizeHeight: resizeH, resizeQuality: 'low' })
-        .then((bitmap) => {
-          this.worker.postMessage({
-            type: 'ANALYZE_PIXELS',
-            data: {
-              bitmap,
-              checkLetterbox,
-              checkPillarbox,
-              isShorts: this.isShorts
+      try {
+        createImageBitmap(this.video, { resizeWidth: resizeW, resizeHeight: resizeH, resizeQuality: 'low' })
+          .then((bitmap) => {
+            if (!this.worker || !this.isWorkerReady) {
+              if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+              this.isAnalyzingInWorker = false;
+              return;
             }
-          }, [bitmap]);
-        })
-        .catch(() => {
-          this.isAnalyzingInWorker = false;
-          this.detectLetterboxMainThread(checkLetterbox, checkPillarbox);
-        });
+            this.worker.postMessage({
+              type: 'ANALYZE_PIXELS',
+              data: {
+                bitmap,
+                checkLetterbox,
+                checkPillarbox,
+                isShorts: this.isShorts
+              }
+            }, [bitmap]);
+          })
+          .catch(() => {
+            this.isAnalyzingInWorker = false;
+            this.detectLetterboxMainThread(checkLetterbox, checkPillarbox);
+          });
+      } catch (bitmapSyncErr) {
+        this.isAnalyzingInWorker = false;
+        this.detectLetterboxMainThread(checkLetterbox, checkPillarbox);
+      }
       return;
     }
 
@@ -441,7 +503,7 @@ export class AmbientEngine {
   }
 
   detectLetterboxMainThread(checkLetterbox, checkPillarbox) {
-    if (!this.analysisCtx) return;
+    if (!this.analysisCtx || !this.video || this.video.videoWidth <= 0 || this.video.videoHeight <= 0) return;
 
     try {
       const w = this.analysisCanvas.width;
@@ -449,6 +511,26 @@ export class AmbientEngine {
       this.analysisCtx.drawImage(this.video, 0, 0, w, h);
       const imgData = this.analysisCtx.getImageData(0, 0, w, h).data;
       const threshold = 18;
+
+      // Sahne kararması kontrolü (Merkez parlaklık analizi):
+      // Eğer merkez de tamamen karanlıksa bu letterbox değil sahne kararmasıdır; kırpma sıfırlanır.
+      const centerX = Math.floor(w / 2);
+      const centerY = Math.floor(h / 2);
+      let centerLumSum = 0;
+      let sampleCount = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const idx = ((centerY + dy) * w + (centerX + dx)) * 4;
+          centerLumSum += 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+          sampleCount++;
+        }
+      }
+      const avgCenterLum = centerLumSum / sampleCount;
+
+      if (avgCenterLum <= threshold) {
+        this.letterboxCrop = { top: 0, bottom: 0, left: 0, right: 0 };
+        return;
+      }
 
       let cropTop = 0;
       let cropBottom = 0;
@@ -536,10 +618,15 @@ export class AmbientEngine {
     const vw = this.video.videoWidth || this.canvasWidth;
     const vh = this.video.videoHeight || this.canvasHeight;
 
-    const sx = vw * this.letterboxCrop.left;
-    const sy = vh * this.letterboxCrop.top;
-    const sw = Math.max(10, vw * (1 - this.letterboxCrop.left - this.letterboxCrop.right));
-    const sh = Math.max(10, vh * (1 - this.letterboxCrop.top - this.letterboxCrop.bottom));
+    const cropL = Math.max(0, Math.min(0.4, this.letterboxCrop.left));
+    const cropR = Math.max(0, Math.min(0.4, this.letterboxCrop.right));
+    const cropT = Math.max(0, Math.min(0.4, this.letterboxCrop.top));
+    const cropB = Math.max(0, Math.min(0.4, this.letterboxCrop.bottom));
+
+    const sx = Math.max(0, Math.floor(vw * cropL));
+    const sy = Math.max(0, Math.floor(vh * cropT));
+    const sw = Math.min(vw - sx, Math.max(10, Math.floor(vw * (1 - cropL - cropR))));
+    const sh = Math.min(vh - sy, Math.max(10, Math.floor(vh * (1 - cropT - cropB))));
 
     try {
       // 1. Katman: Diffuse Ambient
@@ -557,7 +644,9 @@ export class AmbientEngine {
           0, 0, this.canvasWidth, this.canvasHeight
         );
       }
-    } catch (err) {}
+    } catch (err) {
+      this.warnOnce('drawFrame', err);
+    }
   }
 
   updateTarget(videoElem, playerElem) {
@@ -616,17 +705,10 @@ export class AmbientEngine {
   }
 
   destroy() {
+    this.destroyed = true;
     this.stop();
-    this.unbindVideoEvents();
-    if (this.onVisibilityChange) {
-      document.removeEventListener('visibilitychange', this.onVisibilityChange);
-    }
-    if (this.worker) {
-      try {
-        this.worker.terminate();
-      } catch (e) {}
-      this.worker = null;
-    }
+    this.unbindVideoEvents(); // visibilitychange dinleyicisi de burada kaldırılır
+    this.disposeWorker();
     if (this.battery && this.batteryUpdateHandler) {
       try {
         this.battery.removeEventListener('chargingchange', this.batteryUpdateHandler);

@@ -25,11 +25,14 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.youtube.com/*"
+        "https://www.youtube.com/*",
+        "https://youtube.com/*"
       ],
       "exclude_matches": [
-        "https://www.youtube.com/live_chat*"
+        "https://www.youtube.com/live_chat*",
+        "https://youtube.com/live_chat*"
       ],
+      "all_frames": true,
       "css": [
         "src/styles/ambient.css",
         "src/styles/menu.css"
@@ -41,7 +44,8 @@
     }
   ],
   "permissions": [
-    "storage"
+    "storage",
+    "activeTab"
   ],
   "commands": {
     "toggle-ambient": {
@@ -60,8 +64,10 @@
         "src/render-worker.js"
       ],
       "matches": [
-        "https://www.youtube.com/*"
-      ]
+        "https://www.youtube.com/*",
+        "https://youtube.com/*"
+      ],
+      "use_dynamic_url": true
     }
   ]
 }

@@ -265,11 +265,16 @@ export class PlayerUI {
   }
 
   setupEventListeners() {
-    // YouTube kontrolleri fare üzerine gelindiğinde dinamik üretebilir (lazy controls)
+    let hoverRaf = null;
     this.onPlayerHover = () => {
-      if (!this.button || !this.button.isConnected) {
-        this.mountButton();
-      }
+      if (this.button && this.button.isConnected) return;
+      if (hoverRaf) return;
+      hoverRaf = requestAnimationFrame(() => {
+        hoverRaf = null;
+        if (!this.button || !this.button.isConnected) {
+          this.mountButton();
+        }
+      });
     };
 
     if (this.player) {
@@ -316,6 +321,10 @@ export class PlayerUI {
 
   closeMenu() {
     if (!this.isOpen) return;
+    if (this.tabAbortController) {
+      this.tabAbortController.abort();
+      this.tabAbortController = null;
+    }
     if (this.menuOverlay) {
       this.menuOverlay.remove();
       this.menuOverlay = null;
@@ -385,7 +394,11 @@ export class PlayerUI {
     const isShorts = location.pathname.startsWith('/shorts') ||
       Boolean(this.player?.closest?.('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
 
-    if (isShorts) {
+    const fullscreenElem = document.fullscreenElement;
+
+    if (fullscreenElem) {
+      fullscreenElem.appendChild(this.menuOverlay);
+    } else if (isShorts) {
       this.menuOverlay.classList.add('lumaborder-shorts-menu');
       document.body.appendChild(this.menuOverlay);
     } else {
@@ -524,7 +537,7 @@ export class PlayerUI {
             <button class="lumaborder-color-dot ${s.biasLightingColor === '#00e5ff' ? 'active' : ''}" data-color="#00e5ff" title="${i18n.t('biasColorCyber')}" style="background: #00e5ff;"></button>
             <button class="lumaborder-color-dot ${s.biasLightingColor === '#ff5e00' ? 'active' : ''}" data-color="#ff5e00" title="${i18n.t('biasColorSunset')}" style="background: #ff5e00;"></button>
             <button class="lumaborder-color-dot ${s.biasLightingColor === '#bd00ff' ? 'active' : ''}" data-color="#bd00ff" title="${i18n.t('biasColorPurple')}" style="background: #bd00ff;"></button>
-            <input type="color" id="bias-custom-color" class="lumaborder-color-picker" value="${s.biasLightingColor || '#ffe4b5'}" title="${i18n.t('biasColorCustom')}">
+            <input type="color" id="bias-custom-color" class="lumaborder-color-picker" value="${(typeof s.biasLightingColor === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.biasLightingColor.trim())) ? s.biasLightingColor.trim() : '#ffe4b5'}" title="${i18n.t('biasColorCustom')}">
           </div>
         </div>
       `;
@@ -700,6 +713,12 @@ export class PlayerUI {
   bindTabContentEvents() {
     if (!this.menuOverlay) return;
 
+    if (this.tabAbortController) {
+      this.tabAbortController.abort();
+    }
+    this.tabAbortController = new AbortController();
+    const { signal } = this.tabAbortController;
+
     // Master Switch
     const masterToggle = this.menuOverlay.querySelector('#lumaborder-master-toggle');
     if (masterToggle) {
@@ -708,7 +727,7 @@ export class PlayerUI {
         await this.settingsManager.save({ enabled });
         this.ambientEngine.applySettings({ enabled });
         this.updateButtonState();
-      });
+      }, { signal });
     }
 
     // Slider'lar
@@ -720,11 +739,11 @@ export class PlayerUI {
           const val = parseInt(e.target.value, 10);
           valLabel.textContent = `${val}${unit}`;
           this.ambientEngine.applySettings({ [key]: val });
-        });
+        }, { signal });
         slider.addEventListener('change', async (e) => {
           const val = parseInt(e.target.value, 10);
           await this.settingsManager.save({ [key]: val, activePreset: 'custom' });
-        });
+        }, { signal });
       }
     };
 
@@ -744,7 +763,7 @@ export class PlayerUI {
         await this.settingsManager.applyPreset(presetKey);
         this.ambientEngine.applySettings(this.settingsManager.current);
         this.renderMenu();
-      });
+      }, { signal });
     });
 
     // Checkbox'lar
@@ -755,7 +774,7 @@ export class PlayerUI {
           await this.settingsManager.save({ [key]: e.target.checked });
           this.ambientEngine.applySettings({ [key]: e.target.checked });
           if (onChangeExtra) onChangeExtra(e.target.checked);
-        });
+        }, { signal });
       }
     };
 
@@ -782,14 +801,14 @@ export class PlayerUI {
         if (valFps) valFps.textContent = fps === 'sync' ? i18n.t('fpsSync') : `${fps} FPS`;
         await this.settingsManager.save({ targetFps: fps, activePreset: 'custom' });
         this.ambientEngine.applySettings({ targetFps: fps });
-      });
+      }, { signal });
     });
 
     // Pil Bilgisi Kartı
     this.updateBatteryCard(this.ambientEngine?.batteryInfo);
 
-    // Bias Lighting Mode Butonları
-    const biasModeBtns = this.menuOverlay.querySelectorAll('.lumaborder-mode-pill');
+    // Bias Lighting Mode Butonları (Yalnızca bias modu butonlarını seç)
+    const biasModeBtns = this.menuOverlay.querySelectorAll('.lumaborder-bias-modes .lumaborder-mode-pill');
     biasModeBtns.forEach(btn => {
       btn.addEventListener('click', async () => {
         const mode = btn.dataset.biasmode;
@@ -798,7 +817,7 @@ export class PlayerUI {
         this.ambientEngine.applySettings({ biasLightingMode: mode });
         const palette = this.menuOverlay.querySelector('#bias-color-palette');
         if (palette) palette.style.display = mode === 'off' ? 'none' : 'block';
-      });
+      }, { signal });
     });
 
     // Bias Lighting Renk Noktaları
@@ -811,7 +830,7 @@ export class PlayerUI {
         this.ambientEngine.applySettings({ biasLightingColor: color });
         const picker = this.menuOverlay.querySelector('#bias-custom-color');
         if (picker) picker.value = color;
-      });
+      }, { signal });
     });
 
     // Custom Color Picker
@@ -819,11 +838,11 @@ export class PlayerUI {
     if (customColor) {
       customColor.addEventListener('input', (e) => {
         this.ambientEngine.applySettings({ biasLightingColor: e.target.value });
-      });
+      }, { signal });
       customColor.addEventListener('change', async (e) => {
         await this.settingsManager.save({ biasLightingColor: e.target.value });
         colorDots.forEach(d => d.classList.remove('active'));
-      });
+      }, { signal });
     }
   }
 

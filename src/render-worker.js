@@ -67,6 +67,7 @@ self.onmessage = function (e) {
       if (!bitmap) return;
 
       let crop = { top: 0, bottom: 0, left: 0, right: 0 };
+      try {
         const reqW = isShorts ? 18 : 32;
         const reqH = isShorts ? 32 : 18;
         if (!analysisCanvas || analysisCanvas.width !== reqW || analysisCanvas.height !== reqH) {
@@ -79,56 +80,73 @@ self.onmessage = function (e) {
         const imgData = analysisCtx.getImageData(0, 0, w, h).data;
         const threshold = 18;
 
-        let cropTop = 0;
-        let cropBottom = 0;
-        let cropLeft = 0;
-        let cropRight = 0;
-
-        if (checkLetterbox) {
-          for (let y = 0; y < Math.floor(h / 3); y++) {
-            let isBlack = true;
-            for (let x = 4; x < w - 4; x += 2) {
-              const idx = (y * w + x) * 4;
-              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-              if (lum > threshold) { isBlack = false; break; }
-            }
-            if (isBlack) cropTop = (y + 1) / h; else break;
-          }
-
-          for (let y = h - 1; y >= Math.floor(h * 0.66); y--) {
-            let isBlack = true;
-            for (let x = 4; x < w - 4; x += 2) {
-              const idx = (y * w + x) * 4;
-              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-              if (lum > threshold) { isBlack = false; break; }
-            }
-            if (isBlack) cropBottom = (h - y) / h; else break;
+        // Sahne kararması kontrolü (Merkez parlaklık analizi):
+        // Eğer merkez de tamamen karanlıksa bu letterbox değil sahne kararmasıdır; kırpma uygulanmaz.
+        const centerX = Math.floor(w / 2);
+        const centerY = Math.floor(h / 2);
+        let centerLumSum = 0;
+        let sampleCount = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const idx = ((centerY + dy) * w + (centerX + dx)) * 4;
+            centerLumSum += 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+            sampleCount++;
           }
         }
+        const avgCenterLum = centerLumSum / sampleCount;
 
-        if (checkPillarbox && !isShorts) {
-          for (let x = 0; x < Math.floor(w / 3); x++) {
-            let isBlack = true;
-            for (let y = 2; y < h - 2; y += 2) {
-              const idx = (y * w + x) * 4;
-              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-              if (lum > threshold) { isBlack = false; break; }
+        if (avgCenterLum > threshold) {
+          let cropTop = 0;
+          let cropBottom = 0;
+          let cropLeft = 0;
+          let cropRight = 0;
+
+          if (checkLetterbox) {
+            for (let y = 0; y < Math.floor(h / 3); y++) {
+              let isBlack = true;
+              for (let x = 4; x < w - 4; x += 2) {
+                const idx = (y * w + x) * 4;
+                const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+                if (lum > threshold) { isBlack = false; break; }
+              }
+              if (isBlack) cropTop = (y + 1) / h; else break;
             }
-            if (isBlack) cropLeft = (x + 1) / w; else break;
+
+            for (let y = h - 1; y >= Math.floor(h * 0.66); y--) {
+              let isBlack = true;
+              for (let x = 4; x < w - 4; x += 2) {
+                const idx = (y * w + x) * 4;
+                const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+                if (lum > threshold) { isBlack = false; break; }
+              }
+              if (isBlack) cropBottom = (h - y) / h; else break;
+            }
           }
 
-          for (let x = w - 1; x >= Math.floor(w * 0.66); x--) {
-            let isBlack = true;
-            for (let y = 2; y < h - 2; y += 2) {
-              const idx = (y * w + x) * 4;
-              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
-              if (lum > threshold) { isBlack = false; break; }
+          if (checkPillarbox && !isShorts) {
+            for (let x = 0; x < Math.floor(w / 3); x++) {
+              let isBlack = true;
+              for (let y = 2; y < h - 2; y += 2) {
+                const idx = (y * w + x) * 4;
+                const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+                if (lum > threshold) { isBlack = false; break; }
+              }
+              if (isBlack) cropLeft = (x + 1) / w; else break;
             }
-            if (isBlack) cropRight = (w - x) / w; else break;
+
+            for (let x = w - 1; x >= Math.floor(w * 0.66); x--) {
+              let isBlack = true;
+              for (let y = 2; y < h - 2; y += 2) {
+                const idx = (y * w + x) * 4;
+                const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+                if (lum > threshold) { isBlack = false; break; }
+              }
+              if (isBlack) cropRight = (w - x) / w; else break;
+            }
           }
+
+          crop = { top: cropTop, bottom: cropBottom, left: cropLeft, right: cropRight };
         }
-
-        crop = { top: cropTop, bottom: cropBottom, left: cropLeft, right: cropRight };
       } catch (err) {
       } finally {
         if (bitmap && typeof bitmap.close === 'function') {

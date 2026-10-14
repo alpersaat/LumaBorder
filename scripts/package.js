@@ -29,6 +29,8 @@ const filesToInclude = [
   'popup',
   'src/content.js',
   'src/render-worker.js',
+  'src/settings.js',
+  'src/i18n.js',
   'src/styles'
 ];
 

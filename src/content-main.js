@@ -22,6 +22,8 @@ import { PlayerUI } from './player-ui.js';
       this.currentPlayer = null;
       this.currentReel = null;
       this.initTimeout = null;
+      this.retryTimeout = null;
+      this.observer = null;
 
       this.init();
     }
@@ -40,6 +42,19 @@ import { PlayerUI } from './player-ui.js';
           if (this.playerUI) this.playerUI.updateButtonState();
         });
 
+        // Popup veya arka plandan gelen doğrudan mesajları dinle
+        if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+          chrome.runtime.onMessage.addListener((msg) => {
+            if (msg && msg.action === 'SETTINGS_UPDATED') {
+              settingsManager.load().then((updated) => {
+                i18n.setLanguage(updated.language || 'tr');
+                if (this.ambientEngine) this.ambientEngine.applySettings(updated);
+                if (this.playerUI) this.playerUI.updateButtonState();
+              });
+            }
+          });
+        }
+
         this.checkAndBootstrap();
       } catch (err) {
         console.warn('[LumaBorder] Başlatma hatası:', err);
@@ -50,6 +65,13 @@ import { PlayerUI } from './player-ui.js';
       window.addEventListener('yt-navigate-finish', () => this.scheduleBootstrap(150));
       window.addEventListener('spfdone', () => this.scheduleBootstrap(150));
       window.addEventListener('popstate', () => this.scheduleBootstrap(150));
+
+      // Video çözünürlük veya kaynak değişimleri (Oynatma listesi / SPA geçişleri)
+      document.addEventListener('loadedmetadata', (e) => {
+        if (e.target && e.target.tagName === 'VIDEO') {
+          this.scheduleBootstrap(100);
+        }
+      }, true);
 
       // Shorts video geçişleri için scroll ve yön tuşları dinleyicileri
       window.addEventListener('wheel', () => {
@@ -72,10 +94,14 @@ import { PlayerUI } from './player-ui.js';
         }
       }, { passive: true });
 
-      // Video oynatılmaya başlandığı an (Shorts geçişlerinde en kesin sinyal)
+      // Video oynatılmaya başlandığı an (Shorts ve Standart video geçişlerinde en kesin tetikleyici)
       document.addEventListener('play', (e) => {
-        if (location.pathname.startsWith('/shorts') && e.target && e.target.tagName === 'VIDEO') {
-          this.handleShortsVideoPlay(e.target);
+        if (e.target && e.target.tagName === 'VIDEO') {
+          if (location.pathname.startsWith('/shorts')) {
+            this.handleShortsVideoPlay(e.target);
+          } else {
+            this.scheduleBootstrap(100);
+          }
         }
       }, true);
     }
@@ -101,23 +127,29 @@ import { PlayerUI } from './player-ui.js';
 
     observeDOM() {
       try {
+        let observerDebounce = null;
         const observer = new MutationObserver(() => {
-          const isShorts = location.pathname.startsWith('/shorts');
-          if (isShorts) {
-            const activeReel = document.querySelector('ytd-reel-video-renderer[is-active]');
-            const video = activeReel ? activeReel.querySelector('video') : document.querySelector('ytd-shorts video');
-            if (video && (video !== this.currentVideo || activeReel !== this.currentReel)) {
-              this.scheduleBootstrap(100);
+          if (observerDebounce) return;
+          observerDebounce = setTimeout(() => {
+            observerDebounce = null;
+            const isShorts = location.pathname.startsWith('/shorts');
+            if (isShorts) {
+              const activeReel = document.querySelector('ytd-reel-video-renderer[is-active]');
+              const video = activeReel ? activeReel.querySelector('video') : document.querySelector('ytd-shorts video');
+              if (video && (video !== this.currentVideo || activeReel !== this.currentReel)) {
+                this.scheduleBootstrap(100);
+              }
+            } else {
+              const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+              if (video && video !== this.currentVideo) {
+                this.scheduleBootstrap(150);
+              }
             }
-          } else {
-            const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
-            if (video && video !== this.currentVideo) {
-              this.scheduleBootstrap(150);
-            }
-          }
+          }, 150);
         });
 
-        const target = document.body || document.documentElement;
+        const target = document.querySelector('ytd-page-manager') || document.body || document.documentElement;
+        this.observer = observer;
         if (target) {
           observer.observe(target, {
             childList: true,
@@ -253,7 +285,7 @@ import { PlayerUI } from './player-ui.js';
       return { video, player, activeReel };
     }
 
-    checkAndBootstrap() {
+    checkAndBootstrap(attempt = 0) {
       const isWatch = location.pathname.startsWith('/watch') || location.pathname.startsWith('/embed/');
       const isShorts = location.pathname.startsWith('/shorts');
 
@@ -265,9 +297,11 @@ import { PlayerUI } from './player-ui.js';
       const { video, player, activeReel } = this.findTargetVideoAndPlayer(isShorts);
 
       if (!video || !player) {
-        setTimeout(() => {
-          this.retryBootstrap(isShorts);
-        }, 300);
+        // Player henüz hazır değil: yol kontrolü yapılan, takip edilen sınırlı yeniden deneme
+        if (attempt < 10) {
+          clearTimeout(this.retryTimeout);
+          this.retryTimeout = setTimeout(() => this.checkAndBootstrap(attempt + 1), 300);
+        }
         return;
       }
 
@@ -277,13 +311,6 @@ import { PlayerUI } from './player-ui.js';
 
       this.currentReel = activeReel;
       this.setup(video, player);
-    }
-
-    retryBootstrap(isShorts) {
-      const { video, player } = this.findTargetVideoAndPlayer(isShorts);
-      if (video && player && (video !== this.currentVideo || player !== this.currentPlayer)) {
-        this.setup(video, player);
-      }
     }
 
     setup(video, player) {
@@ -310,6 +337,10 @@ import { PlayerUI } from './player-ui.js';
     }
 
     teardown() {
+      clearTimeout(this.retryTimeout);
+      clearTimeout(this.initTimeout);
+      this.retryTimeout = null;
+      this.initTimeout = null;
       if (this.ambientEngine) {
         try {
           this.ambientEngine.destroy();
