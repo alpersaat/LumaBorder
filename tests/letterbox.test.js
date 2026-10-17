@@ -36,3 +36,9 @@ test('tamamen karanlık sahne kırpılmaz', () => {
   assert.deepEqual(analyzeLetterbox(d, 32, 18), { top: 0, bottom: 0, left: 0, right: 0 });
 });
 
+test('tam ekran aydınlık sahnelerde kırpma 0 döner (hızlı kenar çıkışı)', () => {
+  const d = frame(32, 18, () => 180);
+  assert.deepEqual(analyzeLetterbox(d, 32, 18), { top: 0, bottom: 0, left: 0, right: 0 });
+});
+
+

@@ -13,6 +13,8 @@
   z-index: 0 !important;
   overflow: visible !important;
   display: block;
+  transform-origin: center center;
+  will-change: transform;
   -webkit-mask-image: var(--lumaborder-bottom-mask, none);
   mask-image: var(--lumaborder-bottom-mask, none);
 }
@@ -97,35 +99,64 @@ ytd-reel-video-renderer #overlay {
   z-index: 10 !important;
 }
 
-/* YouTube Video Kontrol Çubuğu buton stili */
+/* YouTube Video Kontrol Çubuğu buton stili - Native YouTube Hizasında */
 .ytp-button.lumaborder-player-btn {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition: transform 0.2s ease, filter 0.2s ease;
-  vertical-align: top;
-  width: 48px;
+  vertical-align: middle;
+  text-align: center;
+  box-sizing: border-box;
+  width: 40px;
   height: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.9;
+  flex-shrink: 0;
+  line-height: normal;
+  overflow: visible;
+  transition: opacity 0.1s cubic-bezier(0, 0, 0.2, 1);
+}
+
+.ytp-button.lumaborder-player-btn:hover {
+  opacity: 1;
+}
+
+.ytp-button.lumaborder-player-btn:focus-visible {
+  outline: 2px solid #ff9100;
+  outline-offset: -2px;
 }
 
 .ytp-button.lumaborder-player-btn svg {
-  width: 24px;
-  height: 24px;
-  fill: currentColor;
-  filter: drop-shadow(0 0 2px rgba(255, 140, 0, 0.5));
-  transition: all 0.25s ease;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
-.ytp-button.lumaborder-player-btn:hover svg {
-  transform: scale(1.15);
-  filter: drop-shadow(0 0 6px #ff7700) drop-shadow(0 0 12px #ff4500);
+.ytp-button.lumaborder-player-btn .ytp-svg-shadow {
+  stroke: rgba(0, 0, 0, 0.15);
+  stroke-width: 2px;
+  fill: none;
 }
 
-.ytp-button.lumaborder-player-btn.active svg {
+.ytp-button.lumaborder-player-btn .ytp-svg-fill {
+  fill: #fff;
+  transition: fill 0.2s ease, filter 0.2s ease;
+}
+
+.ytp-button.lumaborder-player-btn:hover .ytp-svg-fill {
+  filter: drop-shadow(0 0 4px #ff7700) drop-shadow(0 0 8px #ff4500);
+}
+
+.ytp-button.lumaborder-player-btn.active .ytp-svg-fill {
   fill: #ff9100;
-  filter: drop-shadow(0 0 8px #ff7b00);
+  filter: drop-shadow(0 0 6px #ff7b00);
 }
 
 /* YouTube Shorts Kenar Menüsü Buton Stili (Kompakt ve Native Uyumlu) */
@@ -306,6 +337,7 @@ ytd-reel-video-renderer #overlay {
 }
 
 .lumaborder-tint-active .lumaborder-player-btn.active svg,
+.lumaborder-tint-active .lumaborder-player-btn.active .ytp-svg-fill,
 .lumaborder-tint-active .lumaborder-shorts-btn.active svg {
   fill: var(--lumaborder-accent-color, #ff9100) !important;
   filter: drop-shadow(0 0 8px var(--lumaborder-accent-color, #ff7b00)) !important;

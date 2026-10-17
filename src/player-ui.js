@@ -6,6 +6,8 @@
 
 import { i18n } from './i18n.js';
 import { PRESETS } from './settings.js';
+import { resolveControlsTarget as resolveControlsTargetPure, isShortsContext } from './ui-target.js';
+import { getTabContentHTML } from './menu-content.js';
 
 export class PlayerUI {
   constructor(playerElem, settingsManager, ambientEngine) {
@@ -41,137 +43,18 @@ export class PlayerUI {
   }
 
   /**
-   * YouTube A/B testleri, Shorts ve yeni UI düzenlerine karşı çok katmanlı DOM hedef çözücü
+   * YouTube A/B testleri, Shorts ve yeni UI düzenlerine karşı çok katmanlı DOM hedef çözücü.
+   * Saf mantık src/ui-target.js içindedir ve tests/ui-target.test.js ile doğrulanır.
    */
   resolveControlsTarget() {
-    const isShorts = location.pathname.startsWith('/shorts') ||
-      Boolean(this.player?.closest?.('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
-
-    if (isShorts) {
-      let activeReel = this.player?.closest?.('ytd-reel-video-renderer') ||
-        document.querySelector('ytd-reel-video-renderer[is-active]');
-
-      if (!activeReel) {
-        const videos = Array.from(document.querySelectorAll('ytd-reel-video-renderer video'));
-        const playingVideo = videos.find(v => !v.paused && v.readyState >= 2) || videos.find(v => !v.paused);
-        if (playingVideo) {
-          activeReel = playingVideo.closest('ytd-reel-video-renderer');
-        }
-      }
-
-      if (!activeReel) {
-        const reels = Array.from(document.querySelectorAll('ytd-reel-video-renderer'));
-        if (reels.length > 0) {
-          const centerY = window.innerHeight / 2;
-          let minDistance = Infinity;
-          for (const r of reels) {
-            const rect = r.getBoundingClientRect();
-            const dist = Math.abs((rect.top + rect.height / 2) - centerY);
-            if (dist < minDistance) {
-              minDistance = dist;
-              activeReel = r;
-            }
-          }
-        }
-      }
-
-      const shortsSelectors = [
-        '#actions',
-        'ytd-reel-player-overlay-renderer #actions',
-        '#actions.ytd-reel-player-overlay-renderer',
-        '.ytd-reel-player-overlay-renderer #actions',
-        '#overlay #actions',
-        '.ytd-reel-player-overlay-renderer'
-      ];
-
-      let target = null;
-      if (activeReel) {
-        for (const sel of shortsSelectors) {
-          try {
-            target = activeReel.querySelector(sel);
-            if (target) break;
-          } catch (e) {}
-        }
-      }
-
-      if (!target) {
-        for (const sel of shortsSelectors) {
-          try {
-            target = document.querySelector(sel);
-            if (target) break;
-          } catch (e) {}
-        }
-      }
-
-      if (target) {
-        return { container: target, type: 'shorts', anchor: null, isFallback: false };
-      }
-
-      const shortsContainer = activeReel?.querySelector?.('#player-container') || this.player || document.body;
-      return { container: shortsContainer, type: 'shorts-floating', anchor: null, isFallback: true };
-    }
-
-    const rightControlsSelectors = [
-      '.ytp-right-controls',
-      '.ytp-chrome-bottom .ytp-right-controls',
-      '.ytp-chrome-controls .ytp-right-controls',
-      '.ytp-controls-right',
-      '#movie_player .ytp-right-controls',
-      '.html5-video-player .ytp-right-controls'
-    ];
-
-    let rightControls = null;
-    for (const sel of rightControlsSelectors) {
-      try {
-        rightControls = this.player?.querySelector?.(sel) || document.querySelector(sel);
-        if (rightControls) break;
-      } catch (e) {}
-    }
-
-    if (rightControls) {
-      const anchorSelectors = [
-        '.ytp-settings-button',
-        '.ytp-subtitles-button',
-        '.ytp-miniplayer-button',
-        '.ytp-size-button',
-        '.ytp-fullscreen-button',
-        '.ytp-remote-button'
-      ];
-
-      let anchor = null;
-      for (const sel of anchorSelectors) {
-        try {
-          anchor = rightControls.querySelector(sel);
-          if (anchor) break;
-        } catch (e) {}
-      }
-
-      return { container: rightControls, type: 'standard', anchor, isFallback: false };
-    }
-
-    const bottomControls = this.player?.querySelector?.('.ytp-chrome-bottom') ||
-      this.player?.querySelector?.('.ytp-chrome-controls') ||
-      document.querySelector('.ytp-chrome-bottom');
-    if (bottomControls) {
-      return { container: bottomControls, type: 'standard-alt', anchor: null, isFallback: false };
-    }
-
-    const leftControls = this.player?.querySelector?.('.ytp-left-controls') ||
-      document.querySelector('.ytp-left-controls');
-    if (leftControls) {
-      return { container: leftControls, type: 'standard-left', anchor: null, isFallback: false };
-    }
-
-    const topControls = this.player?.querySelector?.('.ytp-chrome-top-buttons') ||
-      this.player?.querySelector?.('.ytp-chrome-top');
-    if (topControls) {
-      return { container: topControls, type: 'standard-top', anchor: null, isFallback: false };
-    }
-
-    return { container: this.player || document.querySelector('#movie_player') || document.body, type: 'floating', anchor: null, isFallback: true };
+    return resolveControlsTargetPure(document, this.player, {
+      isShorts: isShortsContext(this.player, location.pathname),
+      buttonPosition: this.settingsManager?.current?.buttonPosition || 'left',
+      innerHeight: typeof window !== 'undefined' ? window.innerHeight : 0
+    });
   }
 
-  mountButton() {
+  mountButton(force = false) {
     try {
       const target = this.resolveControlsTarget();
       if (!target || !target.container) {
@@ -179,8 +62,12 @@ export class PlayerUI {
         return;
       }
 
-      if (this.button && this.button.isConnected && this.button.parentElement === target.container) {
-        return;
+      if (!force && this.button && this.button.isConnected && this.button.parentElement === target.container) {
+        if (target.type === 'standard-left') {
+          if (target.container.lastElementChild === this.button) return;
+        } else {
+          return;
+        }
       }
 
       const existing = document.querySelectorAll('.lumaborder-player-btn, .lumaborder-shorts-btn, .lumaborder-floating-btn');
@@ -193,8 +80,9 @@ export class PlayerUI {
         this.button.setAttribute('aria-haspopup', 'true');
         this.button.setAttribute('aria-label', i18n.t('appName'));
         this.button.innerHTML = `
-          <svg viewBox="0 0 24 24">
-            <path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-2 19c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-1h-4v1zm2-17c2.76 0 5 2.24 5 5 0 1.95-1.12 3.63-2.76 4.46L14 11.6V16h-4v-4.4l-.24-.14C8.12 10.63 7 8.95 7 7c0-2.76 2.24-5 5-5z"/>
+          <svg height="100%" version="1.1" viewBox="0 0 36 36" width="100%">
+            <path class="ytp-svg-shadow" transform="matrix(0.8, 0, 0, 0.8, 8.4, 1.4)" d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-2 19c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-1h-4v1zm2-17c2.76 0 5 2.24 5 5 0 1.95-1.12 3.63-2.76 4.46L14 11.6V16h-4v-4.4l-.24-.14C8.12 10.63 7 8.95 7 7c0-2.76 2.24-5 5-5z"/>
+            <path class="ytp-svg-fill" transform="matrix(0.8, 0, 0, 0.8, 8.4, 1.4)" d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-2 19c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-1h-4v1zm2-17c2.76 0 5 2.24 5 5 0 1.95-1.12 3.63-2.76 4.46L14 11.6V16h-4v-4.4l-.24-.14C8.12 10.63 7 8.95 7 7c0-2.76 2.24-5 5-5z"/>
           </svg>
         `;
 
@@ -216,10 +104,53 @@ export class PlayerUI {
         this.button.title = `${i18n.t('appName')} - ${i18n.t('appTagline')}`;
       }
 
-      if (target.anchor && target.anchor.parentNode === target.container) {
-        target.container.insertBefore(this.button, target.anchor);
-      } else {
+      if (target.type === 'standard-left') {
+        // Sol tarafa yerleşim: ytp-left-controls sonuna (zaman ve bölüm göstergesinin sağına) eklenir
         target.container.appendChild(this.button);
+      } else if (target.type === 'shorts') {
+        target.container.appendChild(this.button);
+      } else {
+        // Sağ kontroller veya fallback: ASLA tam ekran butonunun sağına/üstüne eklenmez!
+        if (target.type === 'floating' || target.type === 'shorts-floating') {
+          // Yüzen (fallback) HUD: A/B arayüzlerde kontroller eşleşmediğinde devreye girer.
+          // Viewport'e göre sabit alt-sağ köşede durur -> YouTube'ın kendi
+          // tam-ekran butonuyla jamais çakışmaz ve kullanıcı her zaman görebilir / tıklayabilir.
+          Object.assign(this.button.style, {
+            position: 'fixed',
+            top: 'auto',
+            bottom: '22px',
+            left: 'auto',
+            right: '22px',
+            zIndex: '2147483647'
+          });
+          target.container.appendChild(this.button);
+        } else {
+          let anchorDirectChild = null;
+          if (target.anchor && target.container.contains(target.anchor)) {
+            anchorDirectChild = target.anchor;
+            while (anchorDirectChild && anchorDirectChild.parentElement !== target.container) {
+              anchorDirectChild = anchorDirectChild.parentElement;
+            }
+          }
+
+          if (anchorDirectChild && anchorDirectChild.parentElement === target.container) {
+            target.container.insertBefore(this.button, anchorDirectChild);
+          } else {
+            // Tam ekran butonunun soluna (önüne) veya en başa yerleştir
+            const fsBtn = target.container.querySelector('.ytp-fullscreen-button');
+            let fsDirectChild = fsBtn;
+            while (fsDirectChild && fsDirectChild.parentElement !== target.container) {
+              fsDirectChild = fsDirectChild.parentElement;
+            }
+            if (fsDirectChild && fsDirectChild.parentElement === target.container) {
+              target.container.insertBefore(this.button, fsDirectChild);
+            } else if (target.container.firstChild) {
+              target.container.insertBefore(this.button, target.container.firstChild);
+            } else {
+              target.container.appendChild(this.button);
+            }
+          }
+        }
       }
 
       this.updateButtonState();
@@ -374,8 +305,7 @@ export class PlayerUI {
     this.menuOverlay.addEventListener('keydown', (e) => e.stopPropagation());
     this.menuOverlay.addEventListener('keyup', (e) => e.stopPropagation());
 
-    const isShorts = location.pathname.startsWith('/shorts') ||
-      Boolean(this.player?.closest?.('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
+    const isShorts = isShortsContext(this.player, location.pathname);
 
     const fullscreenElem = document.fullscreenElement;
 
@@ -389,422 +319,30 @@ export class PlayerUI {
       targetContainer.appendChild(this.menuOverlay);
     }
 
+    if (!isShorts) {
+      let isLeft = true;
+      if (this.button && this.button.isConnected) {
+        const btnRect = this.button.getBoundingClientRect();
+        const playerRect = (this.player || document.body).getBoundingClientRect();
+        if (playerRect.width > 0) {
+          isLeft = btnRect.left < (playerRect.left + playerRect.width / 2);
+        }
+      } else {
+        isLeft = (this.settingsManager?.current?.buttonPosition || 'left') === 'left';
+      }
+      this.menuOverlay.classList.toggle('lumaborder-menu-left', isLeft);
+    }
+
     this.bindMenuEvents();
   }
 
+  /**
+   * Sekme içerik HTML'i saf src/menu-content.js'ten üretilir (tests/menu-content.test.js).
+   */
   getTabContentHTML(tab) {
-    const s = this.settingsManager.current;
-
-    if (tab === 'general') {
-      return `
-        <!-- Master Switch -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('masterToggle')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('masterToggleDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="lumaborder-master-toggle" ${s.enabled ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Çift Katmanlı Glow (Dual-Layer) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('dualLayerGlow')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('dualLayerDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-duallayer" ${s.dualLayerGlow ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Parlaklık -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('brightness')}</span>
-            <span class="lumaborder-control-value" id="val-brightness">${s.brightness}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-brightness" min="20" max="250" value="${s.brightness}">
-        </div>
-
-        <!-- Yayılma -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('spread')}</span>
-            <span class="lumaborder-control-value" id="val-spread">${s.spread}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-spread" min="5" max="100" value="${s.spread}">
-        </div>
-
-        <!-- Bulanıklık / Yumuşaklık -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('blur')}</span>
-            <span class="lumaborder-control-value" id="val-blur">${s.blur}px</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-blur" min="10" max="120" value="${s.blur}">
-        </div>
-
-        <!-- 4-Bölge Bağımsız Kenar Kontrolü (Item 2.1) -->
-        <div class="lumaborder-section-divider"></div>
-        <div class="lumaborder-control-header" style="margin-top: 8px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('edgeControls')}</span>
-        </div>
-        <div class="lumaborder-hint-text">${i18n.t('edgeControlsDesc')}</div>
-        <div class="lumaborder-edge-grid">
-          <div class="lumaborder-edge-item">
-            <div class="lumaborder-edge-header">
-              <span>${i18n.t('edgeTop')}</span>
-              <input type="checkbox" id="chk-edge-top" ${s.edgeTop ? 'checked' : ''}>
-            </div>
-            <input type="range" class="lumaborder-range" id="rng-edge-top" min="0" max="200" value="${s.edgeTopSpread}">
-          </div>
-          <div class="lumaborder-edge-item">
-            <div class="lumaborder-edge-header">
-              <span>${i18n.t('edgeRight')}</span>
-              <input type="checkbox" id="chk-edge-right" ${s.edgeRight ? 'checked' : ''}>
-            </div>
-            <input type="range" class="lumaborder-range" id="rng-edge-right" min="0" max="200" value="${s.edgeRightSpread}">
-          </div>
-          <div class="lumaborder-edge-item">
-            <div class="lumaborder-edge-header">
-              <span>${i18n.t('edgeBottom')}</span>
-              <input type="checkbox" id="chk-edge-bottom" ${s.edgeBottom ? 'checked' : ''}>
-            </div>
-            <input type="range" class="lumaborder-range" id="rng-edge-bottom" min="0" max="200" value="${s.edgeBottomSpread}">
-          </div>
-          <div class="lumaborder-edge-item">
-            <div class="lumaborder-edge-header">
-              <span>${i18n.t('edgeLeft')}</span>
-              <input type="checkbox" id="chk-edge-left" ${s.edgeLeft ? 'checked' : ''}>
-            </div>
-            <input type="range" class="lumaborder-range" id="rng-edge-left" min="0" max="200" value="${s.edgeLeftSpread}">
-          </div>
-        </div>
-      `;
-    }
-
-    if (tab === 'effects') {
-      const isBiasOff = s.biasLightingMode === 'off';
-      return `
-        <!-- Doygunluk -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('saturation')}</span>
-            <span class="lumaborder-control-value" id="val-saturation">${s.saturation}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-saturation" min="50" max="220" value="${s.saturation}">
-        </div>
-
-        <!-- Kontrast -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('contrast')}</span>
-            <span class="lumaborder-control-value" id="val-contrast">${s.contrast}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-contrast" min="60" max="160" value="${s.contrast}">
-        </div>
-
-        <!-- Kare Yumuşatma -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('smoothing')}</span>
-            <span class="lumaborder-control-value" id="val-smoothing">${s.smoothing}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-smoothing" min="0" max="100" value="${s.smoothing}">
-        </div>
-
-        <!-- Kelvin Renk Sıcaklığı (Item 2.5) -->
-        <div class="lumaborder-control-row" style="margin-top: 10px;">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('colorTemperature')}</span>
-            <span class="lumaborder-control-value" id="val-kelvin">${s.colorTemperature || 6500}K</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-kelvin" min="2200" max="9300" step="50" value="${s.colorTemperature || 6500}">
-          <div class="lumaborder-hint-text">${i18n.t('colorTemperatureDesc')}</div>
-        </div>
-
-        <!-- Dynamic Accent Tinting (Item 3.4) -->
-        <div class="lumaborder-master-card" style="margin-top: 10px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('dynamicAccent')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('dynamicAccentDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-dynamic-accent" ${s.dynamicAccent ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Dinamik Altyazı Kısma (Item 2.6) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('autoSubtitleDim')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('autoSubtitleDimDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-auto-sub-dim" ${s.autoSubtitleDim ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Sabit Arka Işık (Bias Lighting) -->
-        <div class="lumaborder-section-divider"></div>
-        <div class="lumaborder-control-header" style="margin-top: 10px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('biasLighting')}</span>
-        </div>
-        <div class="lumaborder-bias-modes">
-          <button class="lumaborder-mode-pill ${s.biasLightingMode === 'off' ? 'active' : ''}" data-biasmode="off">${i18n.t('biasModeOff')}</button>
-          <button class="lumaborder-mode-pill ${s.biasLightingMode === 'pause' ? 'active' : ''}" data-biasmode="pause">${i18n.t('biasModePause')}</button>
-          <button class="lumaborder-mode-pill ${s.biasLightingMode === 'always' ? 'active' : ''}" data-biasmode="always">${i18n.t('biasModeAlways')}</button>
-        </div>
-
-        <div class="lumaborder-color-palette" id="bias-color-palette" style="${isBiasOff ? 'display:none;' : ''}">
-          <span class="lumaborder-control-label" style="font-size: 11px;">${i18n.t('biasLightingColor')}:</span>
-          <div class="lumaborder-color-dots">
-            <button class="lumaborder-color-dot ${s.biasLightingColor === '#ffe4b5' ? 'active' : ''}" data-color="#ffe4b5" title="${i18n.t('biasColorWarm')}" style="background: #ffe4b5;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === '#fff4e8' ? 'active' : ''}" data-color="#fff4e8" title="${i18n.t('biasColorNeutral')}" style="background: #fff4e8;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === '#ffffff' ? 'active' : ''}" data-color="#ffffff" title="${i18n.t('biasColorCinema')}" style="background: #ffffff;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === '#00e5ff' ? 'active' : ''}" data-color="#00e5ff" title="${i18n.t('biasColorCyber')}" style="background: #00e5ff;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === '#ff5e00' ? 'active' : ''}" data-color="#ff5e00" title="${i18n.t('biasColorSunset')}" style="background: #ff5e00;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === '#bd00ff' ? 'active' : ''}" data-color="#bd00ff" title="${i18n.t('biasColorPurple')}" style="background: #bd00ff;"></button>
-            <input type="color" id="bias-custom-color" class="lumaborder-color-picker" value="${(typeof s.biasLightingColor === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.biasLightingColor.trim())) ? s.biasLightingColor.trim() : '#ffe4b5'}" title="${i18n.t('biasColorCustom')}">
-          </div>
-        </div>
-      `;
-    }
-
-    if (tab === 'ambilight') {
-      return `
-        <!-- Çok Bölgeli Ambilight (Item 2.2) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('multiZone')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('multiZoneDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-multizone" ${s.multiZone ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-        <div class="lumaborder-zone-modes">
-          <button class="lumaborder-mode-pill ${s.zoneCount === 8 ? 'active' : ''}" data-zones="8">8 ${i18n.t('zoneCount')}</button>
-          <button class="lumaborder-mode-pill ${s.zoneCount === 12 ? 'active' : ''}" data-zones="12">12 ${i18n.t('zoneCount')}</button>
-          <button class="lumaborder-mode-pill ${s.zoneCount === 16 ? 'active' : ''}" data-zones="16">16 ${i18n.t('zoneCount')}</button>
-        </div>
-
-        <!-- Siyah Şerit Doldurucu (Bar Fill - Item 2.3) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('barFill')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('barFillDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-barfill" ${s.barFill ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Banding Önleme (Dithering - Item 2.4) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('debanding')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('debandingDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-debanding" ${s.debanding ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Müzik & Bas Reaktif Ritim Modu (Item 3.1) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('audioReactive')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('audioReactiveDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-audio-reactive" ${s.audioReactive ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-        <div class="lumaborder-control-row" id="row-audio-sens" style="${s.audioReactive ? '' : 'display:none;'}">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t('audioSensitivity')}</span>
-            <span class="lumaborder-control-value" id="val-audio-sens">${s.audioSensitivity || 50}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-audio-sens" min="10" max="100" value="${s.audioSensitivity || 50}">
-        </div>
-
-        <!-- Zaman Ayarlı Gece Karartması (Item 3.3) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('nightShift')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('nightShiftDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-night-shift" ${s.nightShiftEnabled ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-        <div class="lumaborder-time-row" id="row-night-shift-time" style="${s.nightShiftEnabled ? '' : 'display:none;'}">
-          <span>Saat:</span>
-          <input type="text" class="lumaborder-time-input" id="inp-night-start" value="${s.nightShiftStart || '22:00'}" style="width: 55px;">
-          <span>—</span>
-          <input type="text" class="lumaborder-time-input" id="inp-night-end" value="${s.nightShiftEnd || '07:00'}" style="width: 55px;">
-        </div>
-      `;
-    }
-
-    if (tab === 'presets') {
-      return `
-        <div class="lumaborder-presets-grid">
-          <button class="lumaborder-preset-btn ${s.activePreset === 'default' ? 'active' : ''}" data-preset="default">
-            <span class="lumaborder-preset-icon">⚖️</span>
-            <span>${i18n.t('presetDefault')}</span>
-          </button>
-          <button class="lumaborder-preset-btn ${s.activePreset === 'cinema' ? 'active' : ''}" data-preset="cinema">
-            <span class="lumaborder-preset-icon">🎬</span>
-            <span>${i18n.t('presetCinema')}</span>
-          </button>
-          <button class="lumaborder-preset-btn ${s.activePreset === 'vibrant' ? 'active' : ''}" data-preset="vibrant">
-            <span class="lumaborder-preset-icon">⚡</span>
-            <span>${i18n.t('presetVibrant')}</span>
-          </button>
-          <button class="lumaborder-preset-btn ${s.activePreset === 'night' ? 'active' : ''}" data-preset="night">
-            <span class="lumaborder-preset-icon">🌙</span>
-            <span>${i18n.t('presetNight')}</span>
-          </button>
-          <button class="lumaborder-preset-btn ${s.activePreset === 'gaming' ? 'active' : ''}" data-preset="gaming">
-            <span class="lumaborder-preset-icon">🎮</span>
-            <span>${i18n.t('presetGaming')}</span>
-          </button>
-        </div>
-      `;
-    }
-
-    if (tab === 'performance') {
-      const fpsLabel = s.targetFps === 'sync' ? i18n.t('fpsSync') : `${s.targetFps} FPS`;
-      return `
-        <!-- Render Motoru (Item 1.1) -->
-        <div class="lumaborder-control-header" style="margin-top: 4px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('renderEngine')}</span>
-        </div>
-        <div class="lumaborder-engine-modes">
-          <button class="lumaborder-mode-pill ${s.renderEngine === 'webgl' ? 'active' : ''}" data-engine="webgl">${i18n.t('engineWebGL')}</button>
-          <button class="lumaborder-mode-pill ${s.renderEngine === 'canvas2d' ? 'active' : ''}" data-engine="canvas2d">${i18n.t('engineCanvas2D')}</button>
-        </div>
-        <div class="lumaborder-hint-text">${i18n.t('renderEngineDesc')}</div>
-
-        <!-- Renk Uzayı & HDR Tonemapping (Item 1.5) -->
-        <div class="lumaborder-control-header" style="margin-top: 10px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('colorSpace')}</span>
-        </div>
-        <div class="lumaborder-engine-modes">
-          <button class="lumaborder-mode-pill ${s.colorSpace === 'display-p3' ? 'active' : ''}" data-cspace="display-p3">Display P3 (HDR)</button>
-          <button class="lumaborder-mode-pill ${s.colorSpace === 'srgb' ? 'active' : ''}" data-cspace="srgb">sRGB (Standart)</button>
-        </div>
-
-        <div class="lumaborder-master-card" style="margin-top: 8px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('hdrTonemap')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('hdrTonemapDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-hdr-tonemap" ${s.hdrTonemap ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Statik Sahne Dondurucu (Dirty Frame Freeze - Item 1.2) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('freezeDetection')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('freezeDetectionDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-freeze" ${s.freezeDetection ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Hedef Kare Hızı (FPS Limiti) -->
-        <div class="lumaborder-control-header" style="margin-top: 12px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t('targetFps')}</span>
-          <span class="lumaborder-control-value" id="val-target-fps">${fpsLabel}</span>
-        </div>
-        <div class="lumaborder-fps-modes">
-          <button class="lumaborder-mode-pill ${s.targetFps === 'sync' ? 'active' : ''}" data-fps="sync">${i18n.t('fpsSync')}</button>
-          <button class="lumaborder-mode-pill ${String(s.targetFps) === '60' ? 'active' : ''}" data-fps="60">${i18n.t('fps60')}</button>
-          <button class="lumaborder-mode-pill ${String(s.targetFps) === '30' ? 'active' : ''}" data-fps="30">${i18n.t('fps30')}</button>
-        </div>
-
-        <!-- Akıllı Pil Tasarrufu (%20 Altı Otomatik 30 FPS) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('autoBatteryEco')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('autoBatteryEcoDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-battery-eco" ${s.autoBatteryEco ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Canlı Pil Durumu Kartı -->
-        <div class="lumaborder-battery-card" id="lumaborder-battery-card">
-          <div class="lumaborder-battery-info">
-            <span class="lumaborder-battery-icon" id="lumaborder-battery-icon">🔋</span>
-            <div class="lumaborder-battery-text">
-              <span class="lumaborder-battery-title" id="lumaborder-battery-title">${i18n.t('batteryStatusTitle')}</span>
-              <span class="lumaborder-battery-sub" id="lumaborder-battery-sub">Kontrol ediliyor...</span>
-            </div>
-          </div>
-          <span class="lumaborder-battery-tag" id="lumaborder-battery-tag">--</span>
-        </div>
-
-        <!-- OffscreenCanvas & Worker Render (Item 1.3) -->
-        <div class="lumaborder-master-card" style="margin-top: 12px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('workerRender')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('workerRenderDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-worker" ${s.workerRender ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Siyah Şerit Algılama (Item 1.4) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('letterboxDetection')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('letterboxDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-letterbox" ${s.letterboxDetection ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t('pillarboxDetection')}</span>
-            <span class="lumaborder-master-sub">${i18n.t('pillarboxDesc')}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-pillarbox" ${s.pillarboxDetection ? 'checked' : ''}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-      `;
-    }
-
-    return '';
+    return getTabContentHTML(tab, this.settingsManager.current, i18n.t.bind(i18n));
   }
+
 
   bindMenuEvents() {
     if (!this.menuOverlay) return;
@@ -869,6 +407,20 @@ export class PlayerUI {
         this.updateButtonState();
       }, { signal });
     }
+
+    // Buton Konumu Seçimi (Sol vs Sağ)
+    const btnPosButtons = this.menuOverlay.querySelectorAll('#btn-pos-left, #btn-pos-right');
+    btnPosButtons.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const pos = btn.dataset.btnpos;
+        btnPosButtons.forEach(b => b.classList.toggle('active', b === btn));
+        await this.settingsManager.save({ buttonPosition: pos });
+        this.mountButton(true);
+        if (this.menuOverlay) {
+          this.menuOverlay.classList.toggle('lumaborder-menu-left', pos === 'left');
+        }
+      }, { signal });
+    });
 
     // Slider bağlayıcı
     const bindSlider = (id, key, unit = '%', isDirectNumber = false) => {
@@ -939,6 +491,8 @@ export class PlayerUI {
     });
     bindCheckbox('worker', 'workerRender');
     bindCheckbox('freeze', 'freezeDetection');
+    bindCheckbox('drop-sentinel', 'dropFrameSentinel');
+    bindCheckbox('ultra-eco', 'ultraEco');
     bindCheckbox('hdr-tonemap', 'hdrTonemap');
     bindCheckbox('dynamic-accent', 'dynamicAccent');
     bindCheckbox('auto-sub-dim', 'autoSubtitleDim');
@@ -1082,10 +636,12 @@ export class PlayerUI {
       icon.textContent = '🔌';
       title.textContent = i18n.t('batteryStatusTitle');
       sub.textContent = i18n.t('batteryNotSupported');
-      tag.textContent = 'Masaüstü/Harici';
+      tag.textContent = i18n.t('batteryUnsupportedTag');
       tag.className = 'lumaborder-battery-tag desktop';
+      this.setBatteryEcoDisabled(true);
       return;
     }
+    this.setBatteryEcoDisabled(false);
 
     const isCharging = info.charging;
     const level = info.level;
@@ -1109,6 +665,17 @@ export class PlayerUI {
     }
   }
 
+  setBatteryEcoDisabled(disabled) {
+    const chk = this.menuOverlay?.querySelector('#chk-battery-eco');
+    if (!chk) return;
+    chk.disabled = disabled;
+    if (disabled && chk.checked) {
+      chk.checked = false;
+      this.settingsManager.save({ autoBatteryEco: false });
+      this.ambientEngine.applySettings({ autoBatteryEco: false });
+    }
+  }
+
   updateTarget(playerElem, ambientEngine) {
     if (this.player && this.onPlayerHover) {
       this.player.removeEventListener('mouseenter', this.onPlayerHover);
@@ -1126,8 +693,7 @@ export class PlayerUI {
     this.mountButton();
 
     if (this.isOpen && this.menuOverlay) {
-      const isShorts = location.pathname.startsWith('/shorts') ||
-        Boolean(this.player?.closest?.('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
+      const isShorts = isShortsContext(this.player, location.pathname);
       this.menuOverlay.classList.toggle('lumaborder-shorts-menu', isShorts);
       if (this.activeTab === 'performance') {
         this.updateBatteryCard(this.ambientEngine?.batteryInfo);

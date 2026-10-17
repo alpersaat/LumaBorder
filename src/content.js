@@ -113,6 +113,7 @@
       batteryEcoActiveBadge: "\u{1F50B} Pil Tasarrufu Devrede (30 FPS Eko)",
       batteryEcoDisabledBadge: "\u26A1 Normal Performans",
       batteryNotSupported: "Pil API Desteklenmiyor",
+      batteryUnsupportedTag: "Desteklenmiyor",
       letterboxDetection: "\xDCst/Alt \u015Eeritleri K\u0131rp (Letterbox)",
       letterboxDesc: "Sinemaskop filmlerdeki yatay siyah \u015Feritleri yok sayar",
       pillarboxDetection: "Yan \u015Eeritleri K\u0131rp (Pillarbox)",
@@ -248,6 +249,7 @@
       batteryEcoActiveBadge: "\u{1F50B} Battery Saver Active (30 FPS Eco)",
       batteryEcoDisabledBadge: "\u26A1 Normal Performance",
       batteryNotSupported: "Battery API Not Supported",
+      batteryUnsupportedTag: "Not Supported",
       letterboxDetection: "Crop Top/Bottom Bars (Letterbox)",
       letterboxDesc: "Auto-detects and crops letterbox bars in movies",
       pillarboxDetection: "Crop Side Bars (Pillarbox)",
@@ -668,14 +670,46 @@
         if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.sync) {
           const readArea = (area, defaults) => new Promise((res) => {
             try {
-              chrome.storage[area].get(defaults, (items) => res(chrome.runtime.lastError ? {} : items || {}));
+              chrome.storage[area].get(defaults, (items) => res({ ok: !chrome.runtime.lastError, items: items || {} }));
             } catch (e) {
-              res({});
+              res({ ok: false, items: {} });
             }
           });
-          Promise.all([readArea("sync", DEFAULT_SETTINGS), readArea("local", {})]).then(([sync, local]) => {
-            this.current = this.sanitizeAll({ ...DEFAULT_SETTINGS, ...sync, ...local });
-            resolve(this.current);
+          Promise.all([readArea("sync", DEFAULT_SETTINGS), readArea("local", {})]).then(([syncRes, localRes]) => {
+            const { ok: syncOk, items: sync } = syncRes;
+            const { ok: localOk, items: local } = localRes;
+            const merged = { ...DEFAULT_SETTINGS, ...sync };
+            const toSync = {};
+            for (const key of Object.keys(local)) {
+              if (!(key in DEFAULT_SETTINGS)) continue;
+              const syncVal = sync[key];
+              const localVal = local[key];
+              if (localVal !== DEFAULT_SETTINGS[key] && (syncVal === void 0 || syncVal === DEFAULT_SETTINGS[key])) {
+                toSync[key] = sanitizeSettingValue(key, localVal);
+                merged[key] = toSync[key];
+              }
+            }
+            const localKeys = Object.keys(local).filter((k) => k in DEFAULT_SETTINGS);
+            const apply = () => {
+              this.current = this.sanitizeAll(merged);
+              resolve(this.current);
+            };
+            if (syncOk && Object.keys(toSync).length) {
+              chrome.storage.sync.set(toSync, () => {
+                if (!chrome.runtime.lastError) {
+                  if (localKeys.length) chrome.storage.local.remove(localKeys, apply);
+                  else apply();
+                } else {
+                  apply();
+                }
+              });
+            } else if (syncOk) {
+              if (localKeys.length) chrome.storage.local.remove(localKeys, apply);
+              else apply();
+            } else {
+              this.current = this.sanitizeAll({ ...DEFAULT_SETTINGS, ...local });
+              resolve(this.current);
+            }
           });
         } else {
           try {
@@ -1440,6 +1474,32 @@
     }
   };
 
+  // src/beat-detect.js
+  var BASS_BIN_COUNT = 6;
+  function computeBassEnergy(dataArray, binCount = BASS_BIN_COUNT) {
+    const bins = Math.min(binCount, dataArray?.length || 0);
+    if (bins <= 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < bins; i++) sum += dataArray[i];
+    return sum / bins;
+  }
+  function sensitivityFactor(sensitivity) {
+    return 1.1 + (100 - sensitivity) * 5e-3;
+  }
+  function computePulse(state, dataArray, sensitivity) {
+    const bassEnergy = computeBassEnergy(dataArray);
+    const bassAverage = state.bassAverage * 0.92 + bassEnergy * 0.08;
+    const threshold = Math.max(35, bassAverage * sensitivityFactor(sensitivity));
+    let currentPulse;
+    if (bassEnergy > threshold && bassEnergy > 45) {
+      const punch = Math.min(0.25, (bassEnergy - threshold) / 255 * (sensitivity / 50) * 0.35);
+      currentPulse = Math.max(state.currentPulse, 1 + punch);
+    } else {
+      currentPulse = Math.max(1, state.currentPulse * 0.94);
+    }
+    return { currentPulse, bassAverage, bassEnergy, threshold };
+  }
+
   // src/audio-reactive.js
   var AudioReactiveEngine = class {
     constructor(videoElem, options = {}) {
@@ -1519,21 +1579,13 @@
       }
       try {
         this.analyser.getByteFrequencyData(this.dataArray);
-        const bassBins = Math.min(6, this.dataArray.length);
-        let bassEnergy = 0;
-        for (let i = 0; i < bassBins; i++) {
-          bassEnergy += this.dataArray[i];
-        }
-        bassEnergy = bassEnergy / bassBins;
-        this.bassAverage = this.bassAverage * 0.92 + bassEnergy * 0.08;
-        const sensFactor = 1.1 + (100 - this.sensitivity) * 5e-3;
-        const threshold = Math.max(35, this.bassAverage * sensFactor);
-        if (bassEnergy > threshold && bassEnergy > 45) {
-          const punch = Math.min(0.25, (bassEnergy - threshold) / 255 * (this.sensitivity / 50) * 0.35);
-          this.currentPulse = Math.max(this.currentPulse, 1 + punch);
-        } else {
-          this.currentPulse = Math.max(1, this.currentPulse * 0.94);
-        }
+        const result = computePulse(
+          { currentPulse: this.currentPulse, bassAverage: this.bassAverage },
+          this.dataArray,
+          this.sensitivity
+        );
+        this.currentPulse = result.currentPulse;
+        this.bassAverage = result.bassAverage;
       } catch (e) {
         this.currentPulse = 1;
       }
@@ -1556,6 +1608,138 @@
       this.isAttached = false;
     }
   };
+
+  // src/render-config.js
+  function getCanvasDimensions(isShorts, ultraEco) {
+    const isEco = Boolean(ultraEco);
+    return {
+      width: isShorts ? isEco ? 54 : 108 : isEco ? 96 : 192,
+      height: isShorts ? isEco ? 96 : 192 : isEco ? 54 : 108
+    };
+  }
+  function getAnalysisCanvasSize(isShorts) {
+    return isShorts ? { width: 18, height: 32 } : { width: 32, height: 18 };
+  }
+  function computeLayerStyles(settings, { isShorts = false, now = /* @__PURE__ */ new Date() } = {}) {
+    let effectiveBrightness = settings.brightness;
+    let effectiveKelvin = settings.colorTemperature || 6500;
+    let isNight = false;
+    if (settings.nightShiftEnabled) {
+      isNight = isTimeInWindow(now, settings.nightShiftStart, settings.nightShiftEnd);
+      if (isNight) {
+        effectiveBrightness = Math.round(effectiveBrightness * 0.65);
+        effectiveKelvin = Math.min(3200, effectiveKelvin);
+      }
+    }
+    const blur = Math.max(10, settings.blur);
+    let scaleX, scaleY, tightScaleX, tightScaleY;
+    if (isShorts) {
+      const spreadRatio = settings.spread / 100;
+      scaleX = (1.3 + spreadRatio * 0.4).toFixed(2);
+      scaleY = (1.02 + spreadRatio * 0.05).toFixed(2);
+      tightScaleX = (1.1 + spreadRatio * 0.15).toFixed(2);
+      tightScaleY = (1.01 + spreadRatio * 0.02).toFixed(2);
+    } else {
+      const spreadMultiplier = 1 + settings.spread / 100;
+      scaleX = spreadMultiplier.toFixed(2);
+      scaleY = spreadMultiplier.toFixed(2);
+      const tightScale = Math.min(1.15, 1 + settings.spread / 400).toFixed(2);
+      tightScaleX = tightScale;
+      tightScaleY = tightScale;
+    }
+    return {
+      isNight,
+      effectiveBrightness,
+      effectiveKelvin,
+      blur,
+      tightBlur: Math.max(8, Math.round(blur * 0.35)),
+      smoothingSec: settings.smoothing / 100 * 0.25,
+      scaleX,
+      scaleY,
+      tightScaleX,
+      tightScaleY,
+      brightness: (effectiveBrightness / 100).toFixed(2),
+      contrast: (settings.contrast / 100).toFixed(2),
+      saturate: (settings.saturation / 100).toFixed(2)
+    };
+  }
+  function computeEdgeWeights(settings) {
+    return [
+      settings.edgeTop ? settings.edgeTopSpread / 100 : 0,
+      settings.edgeRight ? settings.edgeRightSpread / 100 : 0,
+      settings.edgeBottom ? settings.edgeBottomSpread / 100 : 0,
+      settings.edgeLeft ? settings.edgeLeftSpread / 100 : 0
+    ];
+  }
+  function computeBottomMask(settings, isSubtitleVisible) {
+    const isSubActive = Boolean(settings.autoSubtitleDim) && Boolean(isSubtitleVisible);
+    const isBottomFadeActive = Boolean(settings.bottomFade) || isSubActive;
+    if (!isBottomFadeActive) return "none";
+    const strength = isSubActive ? 75 : Number(settings.bottomFadeStrength || 60);
+    const bottomAlpha = Math.max(0, 1 - strength / 100).toFixed(2);
+    return `linear-gradient(to bottom, #000 0%, #000 65%, rgba(0,0,0,${bottomAlpha}) 100%)`;
+  }
+  function computeSourceRect(videoWidth, videoHeight, crop = {}, minSize = 10) {
+    const clamp = (v) => Math.max(0, Math.min(0.4, v || 0));
+    const cropL = clamp(crop.left);
+    const cropR = clamp(crop.right);
+    const cropT = clamp(crop.top);
+    const cropB = clamp(crop.bottom);
+    const sx = Math.max(0, Math.floor(videoWidth * cropL));
+    const sy = Math.max(0, Math.floor(videoHeight * cropT));
+    const sw = Math.min(videoWidth - sx, Math.max(minSize, Math.round(videoWidth * (1 - cropL - cropR))));
+    const sh = Math.min(videoHeight - sy, Math.max(minSize, Math.round(videoHeight * (1 - cropT - cropB))));
+    return { sx, sy, sw, sh, cropL, cropR, cropT, cropB };
+  }
+  function computeBarFillPixels(playerRect, crop) {
+    return {
+      top: Math.round(playerRect.height * crop.top),
+      bottom: Math.round(playerRect.height * crop.bottom),
+      left: Math.round(playerRect.width * crop.left),
+      right: Math.round(playerRect.width * crop.right)
+    };
+  }
+  function resolveEffectiveFps(settings, { isBatteryEcoActive = false, penaltyLevel = 0, isFrameFrozen = false } = {}) {
+    if (isFrameFrozen && settings.freezeDetection) return 1;
+    let effectiveFps = isBatteryEcoActive && settings.autoBatteryEco ? 30 : settings.targetFps;
+    if (penaltyLevel >= 1 && (effectiveFps === "sync" || effectiveFps === 60)) {
+      effectiveFps = 30;
+    }
+    return effectiveFps && effectiveFps !== "sync" ? Number(effectiveFps) || 60 : null;
+  }
+  function getMaxBlurPasses(penaltyLevel) {
+    return penaltyLevel >= 2 ? 1 : 3;
+  }
+  function createDropSentinel() {
+    return {
+      lastCheckTime: 0,
+      lastDroppedFrames: 0,
+      lastTotalFrames: 0,
+      penaltyLevel: 0,
+      cleanWindowsCount: 0
+    };
+  }
+  function stepDropSentinel(state, { dropped = 0, total = 0 } = {}) {
+    const deltaDropped = dropped - state.lastDroppedFrames;
+    const deltaTotal = total - state.lastTotalFrames;
+    state.lastDroppedFrames = dropped;
+    state.lastTotalFrames = total;
+    if (deltaTotal <= 0) return state;
+    const dropRatio = deltaDropped / deltaTotal;
+    if (deltaDropped > 2 && dropRatio > 0.04) {
+      state.penaltyLevel = Math.min(2, state.penaltyLevel + 1);
+      state.cleanWindowsCount = 0;
+    } else if (deltaDropped === 0) {
+      state.cleanWindowsCount++;
+      if (state.cleanWindowsCount >= 3 && state.penaltyLevel > 0) {
+        state.penaltyLevel--;
+        state.cleanWindowsCount = 0;
+      }
+    } else if (deltaDropped > 0) {
+      state.cleanWindowsCount = 0;
+    }
+    return state;
+  }
 
   // src/ambient-engine.js
   var AmbientEngine = class {
@@ -1601,21 +1785,15 @@
       this.batteryInfo = { supported: false, charging: true, level: 100, isLowBattery: false, ecoActive: false };
       this.batteryCallbacks = /* @__PURE__ */ new Set();
       this.currentAccentColor = "#ff9100";
-      this.dropSentinel = {
-        lastCheckTime: 0,
-        lastDroppedFrames: 0,
-        lastTotalFrames: 0,
-        penaltyLevel: 0,
-        cleanWindowsCount: 0
-      };
+      this.dropSentinel = createDropSentinel();
       this._lastAudioPulse = 1;
       this._lastBarPx = { top: -1, bottom: -1, left: -1, right: -1 };
       this._lastMaskStr = "";
       this._lastAccentApplied = false;
       this.isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player.closest("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
-      const isEco = Boolean(this.settings.ultraEco);
-      this.canvasWidth = this.isShorts ? isEco ? 54 : 108 : isEco ? 96 : 192;
-      this.canvasHeight = this.isShorts ? isEco ? 96 : 192 : isEco ? 54 : 108;
+      const dims = getCanvasDimensions(this.isShorts, this.settings.ultraEco);
+      this.canvasWidth = dims.width;
+      this.canvasHeight = dims.height;
       this.initDOM();
       this.initEngines();
       this.initWorker();
@@ -1722,8 +1900,7 @@
         });
       } catch (e) {
       }
-      const aW = this.isShorts ? 18 : 32;
-      const aH = this.isShorts ? 32 : 18;
+      const { width: aW, height: aH } = getAnalysisCanvasSize(this.isShorts);
       if (typeof OffscreenCanvas !== "undefined") {
         try {
           this.analysisCanvas = new OffscreenCanvas(aW, aH);
@@ -1878,14 +2055,16 @@
           updateBatteryStatus();
         }).catch(() => {
           this.batteryInfo.supported = false;
+          this.notifyBatteryListeners();
         });
+      } else {
+        this.batteryInfo.supported = false;
+        this.notifyBatteryListeners();
       }
     }
     onBatteryChange(cb) {
       this.batteryCallbacks.add(cb);
-      if (this.batteryInfo.supported) {
-        cb(this.batteryInfo);
-      }
+      cb(this.batteryInfo);
       return () => this.batteryCallbacks.delete(cb);
     }
     notifyBatteryListeners() {
@@ -1982,9 +2161,9 @@
       this.container.style.display = "block";
       const oldW = this.canvasWidth;
       const oldH = this.canvasHeight;
-      const isEco = Boolean(this.settings.ultraEco);
-      this.canvasWidth = this.isShorts ? isEco ? 54 : 108 : isEco ? 96 : 192;
-      this.canvasHeight = this.isShorts ? isEco ? 96 : 192 : isEco ? 54 : 108;
+      const dims = getCanvasDimensions(this.isShorts, this.settings.ultraEco);
+      this.canvasWidth = dims.width;
+      this.canvasHeight = dims.height;
       if (oldW !== this.canvasWidth || oldH !== this.canvasHeight) {
         this.updateCanvasSizes();
       }
@@ -2004,38 +2183,19 @@
         this.audioEngine.setEnabled(this.settings.audioReactive);
         this.audioEngine.setSensitivity(this.settings.audioSensitivity || 50);
       }
-      let effectiveBrightness = this.settings.brightness;
-      let effectiveKelvin = this.settings.colorTemperature || 6500;
-      if (this.settings.nightShiftEnabled) {
-        const isNight = isTimeInWindow(/* @__PURE__ */ new Date(), this.settings.nightShiftStart, this.settings.nightShiftEnd);
-        if (isNight) {
-          effectiveBrightness = Math.round(effectiveBrightness * 0.65);
-          effectiveKelvin = Math.min(3200, effectiveKelvin);
-        }
-      }
-      this.effectiveBrightness = effectiveBrightness;
-      this.effectiveKelvin = effectiveKelvin;
-      const brightness = (effectiveBrightness / 100).toFixed(2);
-      const contrast = (this.settings.contrast / 100).toFixed(2);
-      const saturate = (this.settings.saturation / 100).toFixed(2);
-      const blur = Math.max(10, this.settings.blur);
-      let scaleX, scaleY, tightScaleX, tightScaleY;
-      if (this.isShorts) {
-        const spreadRatio = this.settings.spread / 100;
-        scaleX = (1.3 + spreadRatio * 0.4).toFixed(2);
-        scaleY = (1.02 + spreadRatio * 0.05).toFixed(2);
-        tightScaleX = (1.1 + spreadRatio * 0.15).toFixed(2);
-        tightScaleY = (1.01 + spreadRatio * 0.02).toFixed(2);
-      } else {
-        const spreadMultiplier = 1 + this.settings.spread / 100;
-        scaleX = spreadMultiplier.toFixed(2);
-        scaleY = spreadMultiplier.toFixed(2);
-        const tightScale = Math.min(1.15, 1 + this.settings.spread / 400).toFixed(2);
-        tightScaleX = tightScale;
-        tightScaleY = tightScale;
-      }
-      const tightBlur = Math.max(8, Math.round(blur * 0.35));
-      const smoothingSec = this.settings.smoothing / 100 * 0.25;
+      const styles = computeLayerStyles(this.settings, { isShorts: this.isShorts });
+      this.effectiveBrightness = styles.effectiveBrightness;
+      this.effectiveKelvin = styles.effectiveKelvin;
+      const brightness = styles.brightness;
+      const contrast = styles.contrast;
+      const saturate = styles.saturate;
+      const blur = styles.blur;
+      const scaleX = styles.scaleX;
+      const scaleY = styles.scaleY;
+      const tightScaleX = styles.tightScaleX;
+      const tightScaleY = styles.tightScaleY;
+      const tightBlur = styles.tightBlur;
+      const smoothingSec = styles.smoothingSec;
       this.container.style.setProperty("--lumaborder-blur", `${blur}px`);
       this.container.style.setProperty("--lumaborder-scale", scaleX);
       this.container.style.setProperty("--lumaborder-scale-x", scaleX);
@@ -2066,19 +2226,10 @@
       this.container.classList.toggle("edge-right-off", !this.settings.edgeRight);
       this.container.classList.toggle("edge-left-off", !this.settings.edgeLeft);
       this.container.classList.toggle("edge-bottom-off", !this.settings.edgeBottom);
-      const isSubActive = this.settings.autoSubtitleDim && this.isSubtitleVisible;
-      const isBottomFadeActive = this.settings.bottomFade || isSubActive;
-      if (isBottomFadeActive) {
-        const strength = isSubActive ? 75 : Number(this.settings.bottomFadeStrength || 60);
-        const bottomAlpha = Math.max(0, 1 - strength / 100).toFixed(2);
-        const maskGradient = `linear-gradient(to bottom, #000 0%, #000 65%, rgba(0,0,0,${bottomAlpha}) 100%)`;
-        if (this._lastMaskStr !== maskGradient) {
-          this._lastMaskStr = maskGradient;
-          this.container.style.setProperty("--lumaborder-bottom-mask", maskGradient);
-        }
-      } else if (this._lastMaskStr !== "none") {
-        this._lastMaskStr = "none";
-        this.container.style.setProperty("--lumaborder-bottom-mask", "none");
+      const maskGradient = computeBottomMask(this.settings, this.isSubtitleVisible);
+      if (this._lastMaskStr !== maskGradient) {
+        this._lastMaskStr = maskGradient;
+        this.container.style.setProperty("--lumaborder-bottom-mask", maskGradient);
       }
     }
     applyDynamicAccent(hexColor) {
@@ -2139,22 +2290,7 @@
         if (!quality) return;
         const dropped = quality.droppedVideoFrames || 0;
         const total = quality.totalVideoFrames || 0;
-        const deltaDropped = dropped - this.dropSentinel.lastDroppedFrames;
-        const deltaTotal = total - this.dropSentinel.lastTotalFrames;
-        this.dropSentinel.lastDroppedFrames = dropped;
-        this.dropSentinel.lastTotalFrames = total;
-        if (deltaTotal <= 0) return;
-        const dropRatio = deltaDropped / deltaTotal;
-        if (deltaDropped > 2 && dropRatio > 0.04) {
-          this.dropSentinel.penaltyLevel = Math.min(2, this.dropSentinel.penaltyLevel + 1);
-          this.dropSentinel.cleanWindowsCount = 0;
-        } else if (deltaDropped === 0) {
-          this.dropSentinel.cleanWindowsCount++;
-          if (this.dropSentinel.cleanWindowsCount >= 3 && this.dropSentinel.penaltyLevel > 0) {
-            this.dropSentinel.penaltyLevel--;
-            this.dropSentinel.cleanWindowsCount = 0;
-          }
-        }
+        stepDropSentinel(this.dropSentinel, { dropped, total });
       } catch (e) {
       }
     }
@@ -2178,11 +2314,11 @@
         }
       };
       this.updateDropFrameSentinel();
-      let effectiveFps = this.isBatteryEcoActive && this.settings.autoBatteryEco ? 30 : this.settings.targetFps;
-      if (this.dropSentinel.penaltyLevel >= 1 && (effectiveFps === "sync" || effectiveFps === 60)) {
-        effectiveFps = 30;
-      }
-      const activeTargetFps = this.isFrameFrozen && this.settings.freezeDetection ? 1 : effectiveFps && effectiveFps !== "sync" ? Number(effectiveFps) || 60 : null;
+      const activeTargetFps = resolveEffectiveFps(this.settings, {
+        isBatteryEcoActive: this.isBatteryEcoActive,
+        penaltyLevel: this.dropSentinel.penaltyLevel,
+        isFrameFrozen: this.isFrameFrozen
+      });
       if (activeTargetFps) {
         const intervalMs = 1e3 / activeTargetFps;
         const now = performance.now();
@@ -2212,8 +2348,7 @@
       this.lastAnalysisTime = now;
       if (this.settings.workerRender && this.worker && this.isWorkerReady && !this.isAnalyzingInWorker && typeof createImageBitmap === "function") {
         this.isAnalyzingInWorker = true;
-        const resizeW = this.isShorts ? 18 : 32;
-        const resizeH = this.isShorts ? 32 : 18;
+        const { width: resizeW, height: resizeH } = getAnalysisCanvasSize(this.isShorts);
         try {
           createImageBitmap(this.video, { resizeWidth: resizeW, resizeHeight: resizeH, resizeQuality: "low" }).then((bitmap) => {
             if (!this.worker || !this.isWorkerReady) {
@@ -2300,10 +2435,7 @@
       if (!this.barFillContainer) return;
       const playerRect = this.player?.getBoundingClientRect();
       if (!playerRect) return;
-      const topPx = Math.round(playerRect.height * this.letterboxCrop.top);
-      const bottomPx = Math.round(playerRect.height * this.letterboxCrop.bottom);
-      const leftPx = Math.round(playerRect.width * this.letterboxCrop.left);
-      const rightPx = Math.round(playerRect.width * this.letterboxCrop.right);
+      const { top: topPx, bottom: bottomPx, left: leftPx, right: rightPx } = computeBarFillPixels(playerRect, this.letterboxCrop);
       if (this._lastBarPx.top !== topPx) {
         this._lastBarPx.top = topPx;
         this.container.style.setProperty("--lumaborder-letterbox-top", `${topPx}px`);
@@ -2326,14 +2458,7 @@
       this.detectLetterbox();
       const vw = this.video.videoWidth || this.canvasWidth;
       const vh = this.video.videoHeight || this.canvasHeight;
-      const cropL = Math.max(0, Math.min(0.4, this.letterboxCrop.left));
-      const cropR = Math.max(0, Math.min(0.4, this.letterboxCrop.right));
-      const cropT = Math.max(0, Math.min(0.4, this.letterboxCrop.top));
-      const cropB = Math.max(0, Math.min(0.4, this.letterboxCrop.bottom));
-      const sx = Math.max(0, Math.floor(vw * cropL));
-      const sy = Math.max(0, Math.floor(vh * cropT));
-      const sw = Math.min(vw - sx, Math.max(10, Math.floor(vw * (1 - cropL - cropR))));
-      const sh = Math.min(vh - sy, Math.max(10, Math.floor(vh * (1 - cropT - cropB))));
+      const { sx, sy, sw, sh, cropL, cropR, cropT, cropB } = computeSourceRect(vw, vh, this.letterboxCrop);
       let audioPulse = 1;
       if (this.audioEngine && this.settings.audioReactive) {
         audioPulse = this.audioEngine.update();
@@ -2345,14 +2470,9 @@
         this._lastAudioPulse = 1;
         this.container.style.transform = "translateZ(0)";
       }
-      const edgeWeights = [
-        this.settings.edgeTop ? this.settings.edgeTopSpread / 100 : 0,
-        this.settings.edgeRight ? this.settings.edgeRightSpread / 100 : 0,
-        this.settings.edgeBottom ? this.settings.edgeBottomSpread / 100 : 0,
-        this.settings.edgeLeft ? this.settings.edgeLeftSpread / 100 : 0
-      ];
+      const edgeWeights = computeEdgeWeights(this.settings);
       try {
-        const maxPasses = this.dropSentinel.penaltyLevel >= 2 ? 1 : 3;
+        const maxPasses = getMaxBlurPasses(this.dropSentinel.penaltyLevel);
         if (this.isWebGLActive && this.webglEngine && this.webglEngine.isReady) {
           this.webglEngine.render(this.video, {
             crop: { top: cropT, bottom: cropB, left: cropL, right: cropR },
@@ -2395,9 +2515,9 @@
       this.video = videoElem;
       this.player = playerElem;
       this.isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player.closest("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
-      const isEco = Boolean(this.settings.ultraEco);
-      this.canvasWidth = this.isShorts ? isEco ? 54 : 108 : isEco ? 96 : 192;
-      this.canvasHeight = this.isShorts ? isEco ? 96 : 192 : isEco ? 54 : 108;
+      const dims = getCanvasDimensions(this.isShorts, this.settings.ultraEco);
+      this.canvasWidth = dims.width;
+      this.canvasHeight = dims.height;
       if (this.canvasDiffuse) {
         this.canvasDiffuse.width = this.canvasWidth;
         this.canvasDiffuse.height = this.canvasHeight;
@@ -2413,8 +2533,7 @@
         this.canvasMultiZone.width = this.canvasWidth;
         this.canvasMultiZone.height = this.canvasHeight;
       }
-      const aW = this.isShorts ? 18 : 32;
-      const aH = this.isShorts ? 32 : 18;
+      const { width: aW, height: aH } = getAnalysisCanvasSize(this.isShorts);
       if (this.analysisCanvas) {
         this.analysisCanvas.width = aW;
         this.analysisCanvas.height = aH;
@@ -2473,6 +2592,579 @@
     }
   };
 
+  // src/ui-target.js
+  var SHORTS_ACTION_SELECTORS = [
+    "#actions",
+    "ytd-reel-player-overlay-renderer #actions",
+    "#actions.ytd-reel-player-overlay-renderer",
+    ".ytd-reel-player-overlay-renderer #actions",
+    "#overlay #actions",
+    ".ytd-reel-player-overlay-renderer"
+  ];
+  var LEFT_CONTROLS_SELECTORS = [
+    ".ytp-left-controls",
+    ".ytp-chrome-bottom .ytp-left-controls",
+    ".ytp-chrome-controls .ytp-left-controls",
+    ".ytp-controls-left",
+    "#movie_player .ytp-left-controls",
+    ".html5-video-player .ytp-left-controls"
+  ];
+  var RIGHT_CONTROLS_SELECTORS = [
+    ".ytp-right-controls",
+    ".ytp-chrome-bottom .ytp-right-controls",
+    ".ytp-chrome-controls .ytp-right-controls",
+    ".ytp-controls-right",
+    "#movie_player .ytp-right-controls",
+    ".html5-video-player .ytp-right-controls"
+  ];
+  var RIGHT_ANCHOR_SELECTORS = [
+    ".ytp-subtitles-button",
+    ".ytp-settings-button",
+    ".ytp-miniplayer-button",
+    ".ytp-size-button",
+    ".ytp-fullscreen-button"
+  ];
+  function isShortsContext(player, pathname = "") {
+    return Boolean(pathname && pathname.startsWith("/shorts")) || Boolean(player?.closest?.("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
+  }
+  function safeQuery(scope, selector) {
+    try {
+      return scope?.querySelector?.(selector) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function firstMatch(scopes, selectors) {
+    for (const selector of selectors) {
+      for (const scope of scopes) {
+        const el = safeQuery(scope, selector);
+        if (el) return el;
+      }
+    }
+    return null;
+  }
+  function resolveControlsTarget(doc, player, options = {}) {
+    const { isShorts = false, buttonPosition = "left", innerHeight = 0 } = options;
+    if (isShorts) {
+      let activeReel = player?.closest?.("ytd-reel-video-renderer") || doc.querySelector("ytd-reel-video-renderer[is-active]");
+      if (!activeReel) {
+        const videos = Array.from(doc.querySelectorAll("ytd-reel-video-renderer video"));
+        const playingVideo = videos.find((v) => !v.paused && v.readyState >= 2) || videos.find((v) => !v.paused);
+        if (playingVideo) {
+          activeReel = playingVideo.closest("ytd-reel-video-renderer");
+        }
+      }
+      if (!activeReel) {
+        const reels = Array.from(doc.querySelectorAll("ytd-reel-video-renderer"));
+        if (reels.length > 0) {
+          const centerY = innerHeight / 2;
+          let minDistance = Infinity;
+          for (const r of reels) {
+            const rect = r.getBoundingClientRect();
+            const dist = Math.abs(rect.top + rect.height / 2 - centerY);
+            if (dist < minDistance) {
+              minDistance = dist;
+              activeReel = r;
+            }
+          }
+        }
+      }
+      let target = null;
+      if (activeReel) {
+        target = firstMatch([activeReel], SHORTS_ACTION_SELECTORS);
+      }
+      if (!target) {
+        target = firstMatch([doc], SHORTS_ACTION_SELECTORS);
+      }
+      if (target) {
+        return { container: target, type: "shorts", anchor: null, isFallback: false };
+      }
+      const shortsContainer = activeReel?.querySelector?.("#player-container") || player || doc.body;
+      return { container: shortsContainer, type: "shorts-floating", anchor: null, isFallback: true };
+    }
+    const preferredPos = buttonPosition || "left";
+    const leftControls = firstMatch([player, doc], LEFT_CONTROLS_SELECTORS);
+    const rightControls = firstMatch([player, doc], RIGHT_CONTROLS_SELECTORS);
+    const getRightAnchor = (rc) => {
+      if (!rc) return null;
+      for (const sel of RIGHT_ANCHOR_SELECTORS) {
+        const el = safeQuery(rc, sel);
+        if (el) return el;
+      }
+      return rc.firstElementChild || null;
+    };
+    if (preferredPos === "left" && leftControls) {
+      return { container: leftControls, type: "standard-left", anchor: null, isFallback: false };
+    }
+    if (preferredPos === "right" && rightControls) {
+      return { container: rightControls, type: "standard-right", anchor: getRightAnchor(rightControls), isFallback: false };
+    }
+    if (leftControls) {
+      return { container: leftControls, type: "standard-left", anchor: null, isFallback: false };
+    }
+    if (rightControls) {
+      return { container: rightControls, type: "standard-right", anchor: getRightAnchor(rightControls), isFallback: false };
+    }
+    const bottomControls = safeQuery(player, ".ytp-chrome-bottom") || safeQuery(player, ".ytp-chrome-controls") || safeQuery(doc, ".ytp-chrome-bottom");
+    if (bottomControls) {
+      return { container: bottomControls, type: "standard-alt", anchor: null, isFallback: false };
+    }
+    const topControls = safeQuery(player, ".ytp-chrome-top-buttons") || safeQuery(player, ".ytp-chrome-top");
+    if (topControls) {
+      return { container: topControls, type: "standard-top", anchor: null, isFallback: false };
+    }
+    return {
+      container: player || safeQuery(doc, "#movie_player") || doc.body,
+      type: "floating",
+      anchor: null,
+      isFallback: true
+    };
+  }
+
+  // src/menu-content.js
+  function getTabContentHTML(tab, s, t) {
+    if (tab === "general") {
+      return `
+        <!-- Master Switch -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("masterToggle")}</span>
+            <span class="lumaborder-master-sub">${t("masterToggleDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="lumaborder-master-toggle" ${s.enabled ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Oynat\u0131c\u0131 Buton Konumu (Sol / Sa\u011F) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("buttonPosition")}</span>
+            <span class="lumaborder-master-sub">${t("buttonPositionDesc")}</span>
+          </div>
+          <div class="lumaborder-engine-modes">
+            <button class="lumaborder-mode-pill ${s.buttonPosition !== "right" ? "active" : ""}" data-btnpos="left" id="btn-pos-left">${t("btnPosLeft")}</button>
+            <button class="lumaborder-mode-pill ${s.buttonPosition === "right" ? "active" : ""}" data-btnpos="right" id="btn-pos-right">${t("btnPosRight")}</button>
+          </div>
+        </div>
+
+        <!-- \xC7ift Katmanl\u0131 Glow (Dual-Layer) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("dualLayerGlow")}</span>
+            <span class="lumaborder-master-sub">${t("dualLayerDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-duallayer" ${s.dualLayerGlow ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Parlakl\u0131k -->
+        <div class="lumaborder-control-row">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${t("brightness")}</span>
+            <span class="lumaborder-control-value" id="val-brightness">${s.brightness}%</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-brightness" min="20" max="250" value="${s.brightness}">
+        </div>
+
+        <!-- Yay\u0131lma -->
+        <div class="lumaborder-control-row">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${t("spread")}</span>
+            <span class="lumaborder-control-value" id="val-spread">${s.spread}%</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-spread" min="5" max="100" value="${s.spread}">
+        </div>
+
+        <!-- Bulan\u0131kl\u0131k / Yumu\u015Fakl\u0131k -->
+        <div class="lumaborder-control-row">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${t("blur")}</span>
+            <span class="lumaborder-control-value" id="val-blur">${s.blur}px</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-blur" min="10" max="120" value="${s.blur}">
+        </div>
+
+        <!-- 4-B\xF6lge Ba\u011F\u0131ms\u0131z Kenar Kontrol\xFC (Item 2.1) -->
+        <div class="lumaborder-section-divider"></div>
+        <div class="lumaborder-control-header" style="margin-top: 8px;">
+          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${t("edgeControls")}</span>
+        </div>
+        <div class="lumaborder-hint-text">${t("edgeControlsDesc")}</div>
+        <div class="lumaborder-edge-grid">
+          <div class="lumaborder-edge-item">
+            <div class="lumaborder-edge-header">
+              <span>${t("edgeTop")}</span>
+              <input type="checkbox" id="chk-edge-top" ${s.edgeTop ? "checked" : ""}>
+            </div>
+            <input type="range" class="lumaborder-range" id="rng-edge-top" min="0" max="200" value="${s.edgeTopSpread}">
+          </div>
+          <div class="lumaborder-edge-item">
+            <div class="lumaborder-edge-header">
+              <span>${t("edgeRight")}</span>
+              <input type="checkbox" id="chk-edge-right" ${s.edgeRight ? "checked" : ""}>
+            </div>
+            <input type="range" class="lumaborder-range" id="rng-edge-right" min="0" max="200" value="${s.edgeRightSpread}">
+          </div>
+          <div class="lumaborder-edge-item">
+            <div class="lumaborder-edge-header">
+              <span>${t("edgeBottom")}</span>
+              <input type="checkbox" id="chk-edge-bottom" ${s.edgeBottom ? "checked" : ""}>
+            </div>
+            <input type="range" class="lumaborder-range" id="rng-edge-bottom" min="0" max="200" value="${s.edgeBottomSpread}">
+          </div>
+          <div class="lumaborder-edge-item">
+            <div class="lumaborder-edge-header">
+              <span>${t("edgeLeft")}</span>
+              <input type="checkbox" id="chk-edge-left" ${s.edgeLeft ? "checked" : ""}>
+            </div>
+            <input type="range" class="lumaborder-range" id="rng-edge-left" min="0" max="200" value="${s.edgeLeftSpread}">
+          </div>
+        </div>
+      `;
+    }
+    if (tab === "effects") {
+      const isBiasOff = s.biasLightingMode === "off";
+      return `
+        <!-- Doygunluk -->
+        <div class="lumaborder-control-row">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${t("saturation")}</span>
+            <span class="lumaborder-control-value" id="val-saturation">${s.saturation}%</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-saturation" min="50" max="220" value="${s.saturation}">
+        </div>
+
+        <!-- Kontrast -->
+        <div class="lumaborder-control-row">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${t("contrast")}</span>
+            <span class="lumaborder-control-value" id="val-contrast">${s.contrast}%</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-contrast" min="60" max="160" value="${s.contrast}">
+        </div>
+
+        <!-- Kare Yumu\u015Fatma -->
+        <div class="lumaborder-control-row">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${t("smoothing")}</span>
+            <span class="lumaborder-control-value" id="val-smoothing">${s.smoothing}%</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-smoothing" min="0" max="100" value="${s.smoothing}">
+        </div>
+
+        <!-- Kelvin Renk S\u0131cakl\u0131\u011F\u0131 (Item 2.5) -->
+        <div class="lumaborder-control-row" style="margin-top: 10px;">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${t("colorTemperature")}</span>
+            <span class="lumaborder-control-value" id="val-kelvin">${s.colorTemperature || 6500}K</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-kelvin" min="2200" max="9300" step="50" value="${s.colorTemperature || 6500}">
+          <div class="lumaborder-hint-text">${t("colorTemperatureDesc")}</div>
+        </div>
+
+        <!-- Dynamic Accent Tinting (Item 3.4) -->
+        <div class="lumaborder-master-card" style="margin-top: 10px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("dynamicAccent")}</span>
+            <span class="lumaborder-master-sub">${t("dynamicAccentDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-dynamic-accent" ${s.dynamicAccent ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Dinamik Altyaz\u0131 K\u0131sma (Item 2.6) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("autoSubtitleDim")}</span>
+            <span class="lumaborder-master-sub">${t("autoSubtitleDimDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-auto-sub-dim" ${s.autoSubtitleDim ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Sabit Arka I\u015F\u0131k (Bias Lighting) -->
+        <div class="lumaborder-section-divider"></div>
+        <div class="lumaborder-control-header" style="margin-top: 10px;">
+          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${t("biasLighting")}</span>
+        </div>
+        <div class="lumaborder-bias-modes">
+          <button class="lumaborder-mode-pill ${s.biasLightingMode === "off" ? "active" : ""}" data-biasmode="off">${t("biasModeOff")}</button>
+          <button class="lumaborder-mode-pill ${s.biasLightingMode === "pause" ? "active" : ""}" data-biasmode="pause">${t("biasModePause")}</button>
+          <button class="lumaborder-mode-pill ${s.biasLightingMode === "always" ? "active" : ""}" data-biasmode="always">${t("biasModeAlways")}</button>
+        </div>
+
+        <div class="lumaborder-color-palette" id="bias-color-palette" style="${isBiasOff ? "display:none;" : ""}">
+          <span class="lumaborder-control-label" style="font-size: 11px;">${t("biasLightingColor")}:</span>
+          <div class="lumaborder-color-dots">
+            <button class="lumaborder-color-dot ${s.biasLightingColor === "#ffe4b5" ? "active" : ""}" data-color="#ffe4b5" title="${t("biasColorWarm")}" style="background: #ffe4b5;"></button>
+            <button class="lumaborder-color-dot ${s.biasLightingColor === "#fff4e8" ? "active" : ""}" data-color="#fff4e8" title="${t("biasColorNeutral")}" style="background: #fff4e8;"></button>
+            <button class="lumaborder-color-dot ${s.biasLightingColor === "#ffffff" ? "active" : ""}" data-color="#ffffff" title="${t("biasColorCinema")}" style="background: #ffffff;"></button>
+            <button class="lumaborder-color-dot ${s.biasLightingColor === "#00e5ff" ? "active" : ""}" data-color="#00e5ff" title="${t("biasColorCyber")}" style="background: #00e5ff;"></button>
+            <button class="lumaborder-color-dot ${s.biasLightingColor === "#ff5e00" ? "active" : ""}" data-color="#ff5e00" title="${t("biasColorSunset")}" style="background: #ff5e00;"></button>
+            <button class="lumaborder-color-dot ${s.biasLightingColor === "#bd00ff" ? "active" : ""}" data-color="#bd00ff" title="${t("biasColorPurple")}" style="background: #bd00ff;"></button>
+            <input type="color" id="bias-custom-color" class="lumaborder-color-picker" value="${typeof s.biasLightingColor === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.biasLightingColor.trim()) ? s.biasLightingColor.trim() : "#ffe4b5"}" title="${t("biasColorCustom")}">
+          </div>
+        </div>
+      `;
+    }
+    if (tab === "ambilight") {
+      return `
+        <!-- \xC7ok B\xF6lgeli Ambilight (Item 2.2) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("multiZone")}</span>
+            <span class="lumaborder-master-sub">${t("multiZoneDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-multizone" ${s.multiZone ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+        <div class="lumaborder-zone-modes">
+          <button class="lumaborder-mode-pill ${s.zoneCount === 8 ? "active" : ""}" data-zones="8">8 ${t("zoneCount")}</button>
+          <button class="lumaborder-mode-pill ${s.zoneCount === 12 ? "active" : ""}" data-zones="12">12 ${t("zoneCount")}</button>
+          <button class="lumaborder-mode-pill ${s.zoneCount === 16 ? "active" : ""}" data-zones="16">16 ${t("zoneCount")}</button>
+        </div>
+
+        <!-- Siyah \u015Eerit Doldurucu (Bar Fill - Item 2.3) -->
+        <div class="lumaborder-master-card" style="margin-top: 14px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("barFill")}</span>
+            <span class="lumaborder-master-sub">${t("barFillDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-barfill" ${s.barFill ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Banding \xD6nleme (Dithering - Item 2.4) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("debanding")}</span>
+            <span class="lumaborder-master-sub">${t("debandingDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-debanding" ${s.debanding ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- M\xFCzik & Bas Reaktif Ritim Modu (Item 3.1) -->
+        <div class="lumaborder-master-card" style="margin-top: 14px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("audioReactive")}</span>
+            <span class="lumaborder-master-sub">${t("audioReactiveDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-audio-reactive" ${s.audioReactive ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+        <div class="lumaborder-control-row" id="row-audio-sens" style="${s.audioReactive ? "" : "display:none;"}">
+          <div class="lumaborder-control-header">
+            <span class="lumaborder-control-label">${t("audioSensitivity")}</span>
+            <span class="lumaborder-control-value" id="val-audio-sens">${s.audioSensitivity || 50}%</span>
+          </div>
+          <input type="range" class="lumaborder-range" id="rng-audio-sens" min="10" max="100" value="${s.audioSensitivity || 50}">
+        </div>
+
+        <!-- Zaman Ayarl\u0131 Gece Karartmas\u0131 (Item 3.3) -->
+        <div class="lumaborder-master-card" style="margin-top: 14px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("nightShift")}</span>
+            <span class="lumaborder-master-sub">${t("nightShiftDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-night-shift" ${s.nightShiftEnabled ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+        <div class="lumaborder-time-row" id="row-night-shift-time" style="${s.nightShiftEnabled ? "" : "display:none;"}">
+          <span>Saat:</span>
+          <input type="text" class="lumaborder-time-input" id="inp-night-start" value="${s.nightShiftStart || "22:00"}" style="width: 55px;">
+          <span>\u2014</span>
+          <input type="text" class="lumaborder-time-input" id="inp-night-end" value="${s.nightShiftEnd || "07:00"}" style="width: 55px;">
+        </div>
+      `;
+    }
+    if (tab === "presets") {
+      return `
+        <div class="lumaborder-presets-grid">
+          <button class="lumaborder-preset-btn ${s.activePreset === "default" ? "active" : ""}" data-preset="default">
+            <span class="lumaborder-preset-icon">\u2696\uFE0F</span>
+            <span>${t("presetDefault")}</span>
+          </button>
+          <button class="lumaborder-preset-btn ${s.activePreset === "cinema" ? "active" : ""}" data-preset="cinema">
+            <span class="lumaborder-preset-icon">\u{1F3AC}</span>
+            <span>${t("presetCinema")}</span>
+          </button>
+          <button class="lumaborder-preset-btn ${s.activePreset === "vibrant" ? "active" : ""}" data-preset="vibrant">
+            <span class="lumaborder-preset-icon">\u26A1</span>
+            <span>${t("presetVibrant")}</span>
+          </button>
+          <button class="lumaborder-preset-btn ${s.activePreset === "night" ? "active" : ""}" data-preset="night">
+            <span class="lumaborder-preset-icon">\u{1F319}</span>
+            <span>${t("presetNight")}</span>
+          </button>
+          <button class="lumaborder-preset-btn ${s.activePreset === "gaming" ? "active" : ""}" data-preset="gaming">
+            <span class="lumaborder-preset-icon">\u{1F3AE}</span>
+            <span>${t("presetGaming")}</span>
+          </button>
+        </div>
+      `;
+    }
+    if (tab === "performance") {
+      const fpsLabel = s.targetFps === "sync" ? t("fpsSync") : `${s.targetFps} FPS`;
+      return `
+        <!-- Render Motoru (Item 1.1) -->
+        <div class="lumaborder-control-header" style="margin-top: 4px;">
+          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${t("renderEngine")}</span>
+        </div>
+        <div class="lumaborder-engine-modes">
+          <button class="lumaborder-mode-pill ${s.renderEngine === "webgl" ? "active" : ""}" data-engine="webgl">${t("engineWebGL")}</button>
+          <button class="lumaborder-mode-pill ${s.renderEngine === "canvas2d" ? "active" : ""}" data-engine="canvas2d">${t("engineCanvas2D")}</button>
+        </div>
+        <div class="lumaborder-hint-text">${t("renderEngineDesc")}</div>
+
+        <!-- Renk Uzay\u0131 & HDR Tonemapping (Item 1.5) -->
+        <div class="lumaborder-control-header" style="margin-top: 10px;">
+          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${t("colorSpace")}</span>
+        </div>
+        <div class="lumaborder-engine-modes">
+          <button class="lumaborder-mode-pill ${s.colorSpace === "display-p3" ? "active" : ""}" data-cspace="display-p3">Display P3 (HDR)</button>
+          <button class="lumaborder-mode-pill ${s.colorSpace === "srgb" ? "active" : ""}" data-cspace="srgb">sRGB (Standart)</button>
+        </div>
+
+        <div class="lumaborder-master-card" style="margin-top: 8px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("hdrTonemap")}</span>
+            <span class="lumaborder-master-sub">${t("hdrTonemapDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-hdr-tonemap" ${s.hdrTonemap ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Statik Sahne Dondurucu (Dirty Frame Freeze - Item 1.2) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("freezeDetection")}</span>
+            <span class="lumaborder-master-sub">${t("freezeDetectionDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-freeze" ${s.freezeDetection ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Kare D\xFC\u015F\xFC\u015F\xFC Korumas\u0131 (Drop Sentinel - Item 2) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("dropFrameSentinel")}</span>
+            <span class="lumaborder-master-sub">${t("dropFrameSentinelDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-drop-sentinel" ${s.dropFrameSentinel ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Ultra-Eco \xC7\xF6z\xFCn\xFCrl\xFCk (96x54 / %75 GPU Tasarrufu - Item 6) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("ultraEco")}</span>
+            <span class="lumaborder-master-sub">${t("ultraEcoDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-ultra-eco" ${s.ultraEco ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Hedef Kare H\u0131z\u0131 (FPS Limiti) -->
+        <div class="lumaborder-control-header" style="margin-top: 12px;">
+          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${t("targetFps")}</span>
+          <span class="lumaborder-control-value" id="val-target-fps">${fpsLabel}</span>
+        </div>
+        <div class="lumaborder-fps-modes">
+          <button class="lumaborder-mode-pill ${s.targetFps === "sync" ? "active" : ""}" data-fps="sync">${t("fpsSync")}</button>
+          <button class="lumaborder-mode-pill ${String(s.targetFps) === "60" ? "active" : ""}" data-fps="60">${t("fps60")}</button>
+          <button class="lumaborder-mode-pill ${String(s.targetFps) === "30" ? "active" : ""}" data-fps="30">${t("fps30")}</button>
+        </div>
+
+        <!-- Ak\u0131ll\u0131 Pil Tasarrufu (%20 Alt\u0131 Otomatik 30 FPS) -->
+        <div class="lumaborder-master-card" style="margin-top: 14px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("autoBatteryEco")}</span>
+            <span class="lumaborder-master-sub">${t("autoBatteryEcoDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-battery-eco" ${s.autoBatteryEco ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Canl\u0131 Pil Durumu Kart\u0131 -->
+        <div class="lumaborder-battery-card" id="lumaborder-battery-card">
+          <div class="lumaborder-battery-info">
+            <span class="lumaborder-battery-icon" id="lumaborder-battery-icon">\u{1F50B}</span>
+            <div class="lumaborder-battery-text">
+              <span class="lumaborder-battery-title" id="lumaborder-battery-title">${t("batteryStatusTitle")}</span>
+              <span class="lumaborder-battery-sub" id="lumaborder-battery-sub">Kontrol ediliyor...</span>
+            </div>
+          </div>
+          <span class="lumaborder-battery-tag" id="lumaborder-battery-tag">--</span>
+        </div>
+
+        <!-- OffscreenCanvas & Worker Render (Item 1.3) -->
+        <div class="lumaborder-master-card" style="margin-top: 12px;">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("workerRender")}</span>
+            <span class="lumaborder-master-sub">${t("workerRenderDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-worker" ${s.workerRender ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <!-- Siyah \u015Eerit Alg\u0131lama (Item 1.4) -->
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("letterboxDetection")}</span>
+            <span class="lumaborder-master-sub">${t("letterboxDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-letterbox" ${s.letterboxDetection ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+
+        <div class="lumaborder-master-card">
+          <div class="lumaborder-master-text">
+            <span class="lumaborder-master-title">${t("pillarboxDetection")}</span>
+            <span class="lumaborder-master-sub">${t("pillarboxDesc")}</span>
+          </div>
+          <label class="lumaborder-switch">
+            <input type="checkbox" id="chk-pillarbox" ${s.pillarboxDetection ? "checked" : ""}>
+            <span class="lumaborder-slider-round"></span>
+          </label>
+        </div>
+      `;
+    }
+    return "";
+  }
+
   // src/player-ui.js
   var PlayerUI = class {
     constructor(playerElem, settingsManager2, ambientEngine) {
@@ -2503,139 +3195,15 @@
       this.setupEventListeners();
     }
     /**
-     * YouTube A/B testleri, Shorts ve yeni UI düzenlerine karşı çok katmanlı DOM hedef çözücü
+     * YouTube A/B testleri, Shorts ve yeni UI düzenlerine karşı çok katmanlı DOM hedef çözücü.
+     * Saf mantık src/ui-target.js içindedir ve tests/ui-target.test.js ile doğrulanır.
      */
     resolveControlsTarget() {
-      const isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player?.closest?.("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
-      if (isShorts) {
-        let activeReel = this.player?.closest?.("ytd-reel-video-renderer") || document.querySelector("ytd-reel-video-renderer[is-active]");
-        if (!activeReel) {
-          const videos = Array.from(document.querySelectorAll("ytd-reel-video-renderer video"));
-          const playingVideo = videos.find((v) => !v.paused && v.readyState >= 2) || videos.find((v) => !v.paused);
-          if (playingVideo) {
-            activeReel = playingVideo.closest("ytd-reel-video-renderer");
-          }
-        }
-        if (!activeReel) {
-          const reels = Array.from(document.querySelectorAll("ytd-reel-video-renderer"));
-          if (reels.length > 0) {
-            const centerY = window.innerHeight / 2;
-            let minDistance = Infinity;
-            for (const r of reels) {
-              const rect = r.getBoundingClientRect();
-              const dist = Math.abs(rect.top + rect.height / 2 - centerY);
-              if (dist < minDistance) {
-                minDistance = dist;
-                activeReel = r;
-              }
-            }
-          }
-        }
-        const shortsSelectors = [
-          "#actions",
-          "ytd-reel-player-overlay-renderer #actions",
-          "#actions.ytd-reel-player-overlay-renderer",
-          ".ytd-reel-player-overlay-renderer #actions",
-          "#overlay #actions",
-          ".ytd-reel-player-overlay-renderer"
-        ];
-        let target = null;
-        if (activeReel) {
-          for (const sel of shortsSelectors) {
-            try {
-              target = activeReel.querySelector(sel);
-              if (target) break;
-            } catch (e) {
-            }
-          }
-        }
-        if (!target) {
-          for (const sel of shortsSelectors) {
-            try {
-              target = document.querySelector(sel);
-              if (target) break;
-            } catch (e) {
-            }
-          }
-        }
-        if (target) {
-          return { container: target, type: "shorts", anchor: null, isFallback: false };
-        }
-        const shortsContainer = activeReel?.querySelector?.("#player-container") || this.player || document.body;
-        return { container: shortsContainer, type: "shorts-floating", anchor: null, isFallback: true };
-      }
-      const preferredPos = this.settingsManager?.current?.buttonPosition || "left";
-      const leftControlsSelectors = [
-        ".ytp-left-controls",
-        ".ytp-chrome-bottom .ytp-left-controls",
-        ".ytp-chrome-controls .ytp-left-controls",
-        ".ytp-controls-left",
-        "#movie_player .ytp-left-controls",
-        ".html5-video-player .ytp-left-controls"
-      ];
-      const rightControlsSelectors = [
-        ".ytp-right-controls",
-        ".ytp-chrome-bottom .ytp-right-controls",
-        ".ytp-chrome-controls .ytp-right-controls",
-        ".ytp-controls-right",
-        "#movie_player .ytp-right-controls",
-        ".html5-video-player .ytp-right-controls"
-      ];
-      let leftControls = null;
-      for (const sel of leftControlsSelectors) {
-        try {
-          leftControls = this.player?.querySelector?.(sel) || document.querySelector(sel);
-          if (leftControls) break;
-        } catch (e) {
-        }
-      }
-      let rightControls = null;
-      for (const sel of rightControlsSelectors) {
-        try {
-          rightControls = this.player?.querySelector?.(sel) || document.querySelector(sel);
-          if (rightControls) break;
-        } catch (e) {
-        }
-      }
-      const getRightAnchor = (rc) => {
-        if (!rc) return null;
-        const anchorSelectors = [
-          ".ytp-subtitles-button",
-          ".ytp-settings-button",
-          ".ytp-miniplayer-button",
-          ".ytp-size-button",
-          ".ytp-fullscreen-button"
-        ];
-        for (const sel of anchorSelectors) {
-          try {
-            const el = rc.querySelector(sel);
-            if (el) return el;
-          } catch (e) {
-          }
-        }
-        return rc.firstElementChild || null;
-      };
-      if (preferredPos === "left" && leftControls) {
-        return { container: leftControls, type: "standard-left", anchor: null, isFallback: false };
-      }
-      if (preferredPos === "right" && rightControls) {
-        return { container: rightControls, type: "standard-right", anchor: getRightAnchor(rightControls), isFallback: false };
-      }
-      if (leftControls) {
-        return { container: leftControls, type: "standard-left", anchor: null, isFallback: false };
-      }
-      if (rightControls) {
-        return { container: rightControls, type: "standard-right", anchor: getRightAnchor(rightControls), isFallback: false };
-      }
-      const bottomControls = this.player?.querySelector?.(".ytp-chrome-bottom") || this.player?.querySelector?.(".ytp-chrome-controls") || document.querySelector(".ytp-chrome-bottom");
-      if (bottomControls) {
-        return { container: bottomControls, type: "standard-alt", anchor: null, isFallback: false };
-      }
-      const topControls = this.player?.querySelector?.(".ytp-chrome-top-buttons") || this.player?.querySelector?.(".ytp-chrome-top");
-      if (topControls) {
-        return { container: topControls, type: "standard-top", anchor: null, isFallback: false };
-      }
-      return { container: this.player || document.querySelector("#movie_player") || document.body, type: "floating", anchor: null, isFallback: true };
+      return resolveControlsTarget(document, this.player, {
+        isShorts: isShortsContext(this.player, location.pathname),
+        buttonPosition: this.settingsManager?.current?.buttonPosition || "left",
+        innerHeight: typeof window !== "undefined" ? window.innerHeight : 0
+      });
     }
     mountButton(force = false) {
       try {
@@ -2686,27 +3254,39 @@
         } else if (target.type === "shorts") {
           target.container.appendChild(this.button);
         } else {
-          let anchorDirectChild = null;
-          if (target.anchor && target.container.contains(target.anchor)) {
-            anchorDirectChild = target.anchor;
-            while (anchorDirectChild && anchorDirectChild.parentElement !== target.container) {
-              anchorDirectChild = anchorDirectChild.parentElement;
-            }
-          }
-          if (anchorDirectChild && anchorDirectChild.parentElement === target.container) {
-            target.container.insertBefore(this.button, anchorDirectChild);
+          if (target.type === "floating" || target.type === "shorts-floating") {
+            Object.assign(this.button.style, {
+              position: "fixed",
+              top: "auto",
+              bottom: "22px",
+              left: "auto",
+              right: "22px",
+              zIndex: "2147483647"
+            });
+            target.container.appendChild(this.button);
           } else {
-            const fsBtn = target.container.querySelector(".ytp-fullscreen-button");
-            let fsDirectChild = fsBtn;
-            while (fsDirectChild && fsDirectChild.parentElement !== target.container) {
-              fsDirectChild = fsDirectChild.parentElement;
+            let anchorDirectChild = null;
+            if (target.anchor && target.container.contains(target.anchor)) {
+              anchorDirectChild = target.anchor;
+              while (anchorDirectChild && anchorDirectChild.parentElement !== target.container) {
+                anchorDirectChild = anchorDirectChild.parentElement;
+              }
             }
-            if (fsDirectChild && fsDirectChild.parentElement === target.container) {
-              target.container.insertBefore(this.button, fsDirectChild);
-            } else if (target.container.firstChild) {
-              target.container.insertBefore(this.button, target.container.firstChild);
+            if (anchorDirectChild && anchorDirectChild.parentElement === target.container) {
+              target.container.insertBefore(this.button, anchorDirectChild);
             } else {
-              target.container.appendChild(this.button);
+              const fsBtn = target.container.querySelector(".ytp-fullscreen-button");
+              let fsDirectChild = fsBtn;
+              while (fsDirectChild && fsDirectChild.parentElement !== target.container) {
+                fsDirectChild = fsDirectChild.parentElement;
+              }
+              if (fsDirectChild && fsDirectChild.parentElement === target.container) {
+                target.container.insertBefore(this.button, fsDirectChild);
+              } else if (target.container.firstChild) {
+                target.container.insertBefore(this.button, target.container.firstChild);
+              } else {
+                target.container.appendChild(this.button);
+              }
             }
           }
         }
@@ -2841,7 +3421,7 @@
       this.menuOverlay.addEventListener("mousedown", (e) => e.stopPropagation());
       this.menuOverlay.addEventListener("keydown", (e) => e.stopPropagation());
       this.menuOverlay.addEventListener("keyup", (e) => e.stopPropagation());
-      const isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player?.closest?.("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
+      const isShorts = isShortsContext(this.player, location.pathname);
       const fullscreenElem = document.fullscreenElement;
       if (fullscreenElem) {
         fullscreenElem.appendChild(this.menuOverlay);
@@ -2867,448 +3447,11 @@
       }
       this.bindMenuEvents();
     }
+    /**
+     * Sekme içerik HTML'i saf src/menu-content.js'ten üretilir (tests/menu-content.test.js).
+     */
     getTabContentHTML(tab) {
-      const s = this.settingsManager.current;
-      if (tab === "general") {
-        return `
-        <!-- Master Switch -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("masterToggle")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("masterToggleDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="lumaborder-master-toggle" ${s.enabled ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Oynat\u0131c\u0131 Buton Konumu (Sol / Sa\u011F) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("buttonPosition")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("buttonPositionDesc")}</span>
-          </div>
-          <div class="lumaborder-engine-modes">
-            <button class="lumaborder-mode-pill ${s.buttonPosition !== "right" ? "active" : ""}" data-btnpos="left" id="btn-pos-left">${i18n.t("btnPosLeft")}</button>
-            <button class="lumaborder-mode-pill ${s.buttonPosition === "right" ? "active" : ""}" data-btnpos="right" id="btn-pos-right">${i18n.t("btnPosRight")}</button>
-          </div>
-        </div>
-
-        <!-- \xC7ift Katmanl\u0131 Glow (Dual-Layer) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("dualLayerGlow")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("dualLayerDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-duallayer" ${s.dualLayerGlow ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Parlakl\u0131k -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t("brightness")}</span>
-            <span class="lumaborder-control-value" id="val-brightness">${s.brightness}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-brightness" min="20" max="250" value="${s.brightness}">
-        </div>
-
-        <!-- Yay\u0131lma -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t("spread")}</span>
-            <span class="lumaborder-control-value" id="val-spread">${s.spread}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-spread" min="5" max="100" value="${s.spread}">
-        </div>
-
-        <!-- Bulan\u0131kl\u0131k / Yumu\u015Fakl\u0131k -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t("blur")}</span>
-            <span class="lumaborder-control-value" id="val-blur">${s.blur}px</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-blur" min="10" max="120" value="${s.blur}">
-        </div>
-
-        <!-- 4-B\xF6lge Ba\u011F\u0131ms\u0131z Kenar Kontrol\xFC (Item 2.1) -->
-        <div class="lumaborder-section-divider"></div>
-        <div class="lumaborder-control-header" style="margin-top: 8px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t("edgeControls")}</span>
-        </div>
-        <div class="lumaborder-hint-text">${i18n.t("edgeControlsDesc")}</div>
-        <div class="lumaborder-edge-grid">
-          <div class="lumaborder-edge-item">
-            <div class="lumaborder-edge-header">
-              <span>${i18n.t("edgeTop")}</span>
-              <input type="checkbox" id="chk-edge-top" ${s.edgeTop ? "checked" : ""}>
-            </div>
-            <input type="range" class="lumaborder-range" id="rng-edge-top" min="0" max="200" value="${s.edgeTopSpread}">
-          </div>
-          <div class="lumaborder-edge-item">
-            <div class="lumaborder-edge-header">
-              <span>${i18n.t("edgeRight")}</span>
-              <input type="checkbox" id="chk-edge-right" ${s.edgeRight ? "checked" : ""}>
-            </div>
-            <input type="range" class="lumaborder-range" id="rng-edge-right" min="0" max="200" value="${s.edgeRightSpread}">
-          </div>
-          <div class="lumaborder-edge-item">
-            <div class="lumaborder-edge-header">
-              <span>${i18n.t("edgeBottom")}</span>
-              <input type="checkbox" id="chk-edge-bottom" ${s.edgeBottom ? "checked" : ""}>
-            </div>
-            <input type="range" class="lumaborder-range" id="rng-edge-bottom" min="0" max="200" value="${s.edgeBottomSpread}">
-          </div>
-          <div class="lumaborder-edge-item">
-            <div class="lumaborder-edge-header">
-              <span>${i18n.t("edgeLeft")}</span>
-              <input type="checkbox" id="chk-edge-left" ${s.edgeLeft ? "checked" : ""}>
-            </div>
-            <input type="range" class="lumaborder-range" id="rng-edge-left" min="0" max="200" value="${s.edgeLeftSpread}">
-          </div>
-        </div>
-      `;
-      }
-      if (tab === "effects") {
-        const isBiasOff = s.biasLightingMode === "off";
-        return `
-        <!-- Doygunluk -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t("saturation")}</span>
-            <span class="lumaborder-control-value" id="val-saturation">${s.saturation}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-saturation" min="50" max="220" value="${s.saturation}">
-        </div>
-
-        <!-- Kontrast -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t("contrast")}</span>
-            <span class="lumaborder-control-value" id="val-contrast">${s.contrast}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-contrast" min="60" max="160" value="${s.contrast}">
-        </div>
-
-        <!-- Kare Yumu\u015Fatma -->
-        <div class="lumaborder-control-row">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t("smoothing")}</span>
-            <span class="lumaborder-control-value" id="val-smoothing">${s.smoothing}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-smoothing" min="0" max="100" value="${s.smoothing}">
-        </div>
-
-        <!-- Kelvin Renk S\u0131cakl\u0131\u011F\u0131 (Item 2.5) -->
-        <div class="lumaborder-control-row" style="margin-top: 10px;">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t("colorTemperature")}</span>
-            <span class="lumaborder-control-value" id="val-kelvin">${s.colorTemperature || 6500}K</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-kelvin" min="2200" max="9300" step="50" value="${s.colorTemperature || 6500}">
-          <div class="lumaborder-hint-text">${i18n.t("colorTemperatureDesc")}</div>
-        </div>
-
-        <!-- Dynamic Accent Tinting (Item 3.4) -->
-        <div class="lumaborder-master-card" style="margin-top: 10px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("dynamicAccent")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("dynamicAccentDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-dynamic-accent" ${s.dynamicAccent ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Dinamik Altyaz\u0131 K\u0131sma (Item 2.6) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("autoSubtitleDim")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("autoSubtitleDimDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-auto-sub-dim" ${s.autoSubtitleDim ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Sabit Arka I\u015F\u0131k (Bias Lighting) -->
-        <div class="lumaborder-section-divider"></div>
-        <div class="lumaborder-control-header" style="margin-top: 10px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t("biasLighting")}</span>
-        </div>
-        <div class="lumaborder-bias-modes">
-          <button class="lumaborder-mode-pill ${s.biasLightingMode === "off" ? "active" : ""}" data-biasmode="off">${i18n.t("biasModeOff")}</button>
-          <button class="lumaborder-mode-pill ${s.biasLightingMode === "pause" ? "active" : ""}" data-biasmode="pause">${i18n.t("biasModePause")}</button>
-          <button class="lumaborder-mode-pill ${s.biasLightingMode === "always" ? "active" : ""}" data-biasmode="always">${i18n.t("biasModeAlways")}</button>
-        </div>
-
-        <div class="lumaborder-color-palette" id="bias-color-palette" style="${isBiasOff ? "display:none;" : ""}">
-          <span class="lumaborder-control-label" style="font-size: 11px;">${i18n.t("biasLightingColor")}:</span>
-          <div class="lumaborder-color-dots">
-            <button class="lumaborder-color-dot ${s.biasLightingColor === "#ffe4b5" ? "active" : ""}" data-color="#ffe4b5" title="${i18n.t("biasColorWarm")}" style="background: #ffe4b5;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === "#fff4e8" ? "active" : ""}" data-color="#fff4e8" title="${i18n.t("biasColorNeutral")}" style="background: #fff4e8;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === "#ffffff" ? "active" : ""}" data-color="#ffffff" title="${i18n.t("biasColorCinema")}" style="background: #ffffff;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === "#00e5ff" ? "active" : ""}" data-color="#00e5ff" title="${i18n.t("biasColorCyber")}" style="background: #00e5ff;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === "#ff5e00" ? "active" : ""}" data-color="#ff5e00" title="${i18n.t("biasColorSunset")}" style="background: #ff5e00;"></button>
-            <button class="lumaborder-color-dot ${s.biasLightingColor === "#bd00ff" ? "active" : ""}" data-color="#bd00ff" title="${i18n.t("biasColorPurple")}" style="background: #bd00ff;"></button>
-            <input type="color" id="bias-custom-color" class="lumaborder-color-picker" value="${typeof s.biasLightingColor === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.biasLightingColor.trim()) ? s.biasLightingColor.trim() : "#ffe4b5"}" title="${i18n.t("biasColorCustom")}">
-          </div>
-        </div>
-      `;
-      }
-      if (tab === "ambilight") {
-        return `
-        <!-- \xC7ok B\xF6lgeli Ambilight (Item 2.2) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("multiZone")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("multiZoneDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-multizone" ${s.multiZone ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-        <div class="lumaborder-zone-modes">
-          <button class="lumaborder-mode-pill ${s.zoneCount === 8 ? "active" : ""}" data-zones="8">8 ${i18n.t("zoneCount")}</button>
-          <button class="lumaborder-mode-pill ${s.zoneCount === 12 ? "active" : ""}" data-zones="12">12 ${i18n.t("zoneCount")}</button>
-          <button class="lumaborder-mode-pill ${s.zoneCount === 16 ? "active" : ""}" data-zones="16">16 ${i18n.t("zoneCount")}</button>
-        </div>
-
-        <!-- Siyah \u015Eerit Doldurucu (Bar Fill - Item 2.3) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("barFill")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("barFillDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-barfill" ${s.barFill ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Banding \xD6nleme (Dithering - Item 2.4) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("debanding")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("debandingDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-debanding" ${s.debanding ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- M\xFCzik & Bas Reaktif Ritim Modu (Item 3.1) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("audioReactive")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("audioReactiveDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-audio-reactive" ${s.audioReactive ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-        <div class="lumaborder-control-row" id="row-audio-sens" style="${s.audioReactive ? "" : "display:none;"}">
-          <div class="lumaborder-control-header">
-            <span class="lumaborder-control-label">${i18n.t("audioSensitivity")}</span>
-            <span class="lumaborder-control-value" id="val-audio-sens">${s.audioSensitivity || 50}%</span>
-          </div>
-          <input type="range" class="lumaborder-range" id="rng-audio-sens" min="10" max="100" value="${s.audioSensitivity || 50}">
-        </div>
-
-        <!-- Zaman Ayarl\u0131 Gece Karartmas\u0131 (Item 3.3) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("nightShift")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("nightShiftDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-night-shift" ${s.nightShiftEnabled ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-        <div class="lumaborder-time-row" id="row-night-shift-time" style="${s.nightShiftEnabled ? "" : "display:none;"}">
-          <span>Saat:</span>
-          <input type="text" class="lumaborder-time-input" id="inp-night-start" value="${s.nightShiftStart || "22:00"}" style="width: 55px;">
-          <span>\u2014</span>
-          <input type="text" class="lumaborder-time-input" id="inp-night-end" value="${s.nightShiftEnd || "07:00"}" style="width: 55px;">
-        </div>
-      `;
-      }
-      if (tab === "presets") {
-        return `
-        <div class="lumaborder-presets-grid">
-          <button class="lumaborder-preset-btn ${s.activePreset === "default" ? "active" : ""}" data-preset="default">
-            <span class="lumaborder-preset-icon">\u2696\uFE0F</span>
-            <span>${i18n.t("presetDefault")}</span>
-          </button>
-          <button class="lumaborder-preset-btn ${s.activePreset === "cinema" ? "active" : ""}" data-preset="cinema">
-            <span class="lumaborder-preset-icon">\u{1F3AC}</span>
-            <span>${i18n.t("presetCinema")}</span>
-          </button>
-          <button class="lumaborder-preset-btn ${s.activePreset === "vibrant" ? "active" : ""}" data-preset="vibrant">
-            <span class="lumaborder-preset-icon">\u26A1</span>
-            <span>${i18n.t("presetVibrant")}</span>
-          </button>
-          <button class="lumaborder-preset-btn ${s.activePreset === "night" ? "active" : ""}" data-preset="night">
-            <span class="lumaborder-preset-icon">\u{1F319}</span>
-            <span>${i18n.t("presetNight")}</span>
-          </button>
-          <button class="lumaborder-preset-btn ${s.activePreset === "gaming" ? "active" : ""}" data-preset="gaming">
-            <span class="lumaborder-preset-icon">\u{1F3AE}</span>
-            <span>${i18n.t("presetGaming")}</span>
-          </button>
-        </div>
-      `;
-      }
-      if (tab === "performance") {
-        const fpsLabel = s.targetFps === "sync" ? i18n.t("fpsSync") : `${s.targetFps} FPS`;
-        return `
-        <!-- Render Motoru (Item 1.1) -->
-        <div class="lumaborder-control-header" style="margin-top: 4px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t("renderEngine")}</span>
-        </div>
-        <div class="lumaborder-engine-modes">
-          <button class="lumaborder-mode-pill ${s.renderEngine === "webgl" ? "active" : ""}" data-engine="webgl">${i18n.t("engineWebGL")}</button>
-          <button class="lumaborder-mode-pill ${s.renderEngine === "canvas2d" ? "active" : ""}" data-engine="canvas2d">${i18n.t("engineCanvas2D")}</button>
-        </div>
-        <div class="lumaborder-hint-text">${i18n.t("renderEngineDesc")}</div>
-
-        <!-- Renk Uzay\u0131 & HDR Tonemapping (Item 1.5) -->
-        <div class="lumaborder-control-header" style="margin-top: 10px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t("colorSpace")}</span>
-        </div>
-        <div class="lumaborder-engine-modes">
-          <button class="lumaborder-mode-pill ${s.colorSpace === "display-p3" ? "active" : ""}" data-cspace="display-p3">Display P3 (HDR)</button>
-          <button class="lumaborder-mode-pill ${s.colorSpace === "srgb" ? "active" : ""}" data-cspace="srgb">sRGB (Standart)</button>
-        </div>
-
-        <div class="lumaborder-master-card" style="margin-top: 8px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("hdrTonemap")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("hdrTonemapDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-hdr-tonemap" ${s.hdrTonemap ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Statik Sahne Dondurucu (Dirty Frame Freeze - Item 1.2) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("freezeDetection")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("freezeDetectionDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-freeze" ${s.freezeDetection ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Kare D\xFC\u015F\xFC\u015F\xFC Korumas\u0131 (Drop Sentinel - Item 2) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("dropFrameSentinel")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("dropFrameSentinelDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-drop-sentinel" ${s.dropFrameSentinel ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Ultra-Eco \xC7\xF6z\xFCn\xFCrl\xFCk (96x54 / %75 GPU Tasarrufu - Item 6) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("ultraEco")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("ultraEcoDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-ultra-eco" ${s.ultraEco ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Hedef Kare H\u0131z\u0131 (FPS Limiti) -->
-        <div class="lumaborder-control-header" style="margin-top: 12px;">
-          <span class="lumaborder-control-label" style="font-weight: 700; color: #ff9d2e;">${i18n.t("targetFps")}</span>
-          <span class="lumaborder-control-value" id="val-target-fps">${fpsLabel}</span>
-        </div>
-        <div class="lumaborder-fps-modes">
-          <button class="lumaborder-mode-pill ${s.targetFps === "sync" ? "active" : ""}" data-fps="sync">${i18n.t("fpsSync")}</button>
-          <button class="lumaborder-mode-pill ${String(s.targetFps) === "60" ? "active" : ""}" data-fps="60">${i18n.t("fps60")}</button>
-          <button class="lumaborder-mode-pill ${String(s.targetFps) === "30" ? "active" : ""}" data-fps="30">${i18n.t("fps30")}</button>
-        </div>
-
-        <!-- Ak\u0131ll\u0131 Pil Tasarrufu (%20 Alt\u0131 Otomatik 30 FPS) -->
-        <div class="lumaborder-master-card" style="margin-top: 14px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("autoBatteryEco")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("autoBatteryEcoDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-battery-eco" ${s.autoBatteryEco ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Canl\u0131 Pil Durumu Kart\u0131 -->
-        <div class="lumaborder-battery-card" id="lumaborder-battery-card">
-          <div class="lumaborder-battery-info">
-            <span class="lumaborder-battery-icon" id="lumaborder-battery-icon">\u{1F50B}</span>
-            <div class="lumaborder-battery-text">
-              <span class="lumaborder-battery-title" id="lumaborder-battery-title">${i18n.t("batteryStatusTitle")}</span>
-              <span class="lumaborder-battery-sub" id="lumaborder-battery-sub">Kontrol ediliyor...</span>
-            </div>
-          </div>
-          <span class="lumaborder-battery-tag" id="lumaborder-battery-tag">--</span>
-        </div>
-
-        <!-- OffscreenCanvas & Worker Render (Item 1.3) -->
-        <div class="lumaborder-master-card" style="margin-top: 12px;">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("workerRender")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("workerRenderDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-worker" ${s.workerRender ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <!-- Siyah \u015Eerit Alg\u0131lama (Item 1.4) -->
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("letterboxDetection")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("letterboxDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-letterbox" ${s.letterboxDetection ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-
-        <div class="lumaborder-master-card">
-          <div class="lumaborder-master-text">
-            <span class="lumaborder-master-title">${i18n.t("pillarboxDetection")}</span>
-            <span class="lumaborder-master-sub">${i18n.t("pillarboxDesc")}</span>
-          </div>
-          <label class="lumaborder-switch">
-            <input type="checkbox" id="chk-pillarbox" ${s.pillarboxDetection ? "checked" : ""}>
-            <span class="lumaborder-slider-round"></span>
-          </label>
-        </div>
-      `;
-      }
-      return "";
+      return getTabContentHTML(tab, this.settingsManager.current, i18n.t.bind(i18n));
     }
     bindMenuEvents() {
       if (!this.menuOverlay) return;
@@ -3561,10 +3704,12 @@
         icon.textContent = "\u{1F50C}";
         title.textContent = i18n.t("batteryStatusTitle");
         sub.textContent = i18n.t("batteryNotSupported");
-        tag.textContent = "Masa\xFCst\xFC/Harici";
+        tag.textContent = i18n.t("batteryUnsupportedTag");
         tag.className = "lumaborder-battery-tag desktop";
+        this.setBatteryEcoDisabled(true);
         return;
       }
+      this.setBatteryEcoDisabled(false);
       const isCharging = info.charging;
       const level = info.level;
       const isEco = this.settingsManager.current.autoBatteryEco && !isCharging && level <= 20;
@@ -3584,6 +3729,16 @@
         tag.className = "lumaborder-battery-tag normal";
       }
     }
+    setBatteryEcoDisabled(disabled) {
+      const chk = this.menuOverlay?.querySelector("#chk-battery-eco");
+      if (!chk) return;
+      chk.disabled = disabled;
+      if (disabled && chk.checked) {
+        chk.checked = false;
+        this.settingsManager.save({ autoBatteryEco: false });
+        this.ambientEngine.applySettings({ autoBatteryEco: false });
+      }
+    }
     updateTarget(playerElem, ambientEngine) {
       if (this.player && this.onPlayerHover) {
         this.player.removeEventListener("mouseenter", this.onPlayerHover);
@@ -3597,7 +3752,7 @@
       }
       this.mountButton();
       if (this.isOpen && this.menuOverlay) {
-        const isShorts = location.pathname.startsWith("/shorts") || Boolean(this.player?.closest?.("ytd-shorts, ytd-reel-video-renderer, #shorts-player"));
+        const isShorts = isShortsContext(this.player, location.pathname);
         this.menuOverlay.classList.toggle("lumaborder-shorts-menu", isShorts);
         if (this.activeTab === "performance") {
           this.updateBatteryCard(this.ambientEngine?.batteryInfo);

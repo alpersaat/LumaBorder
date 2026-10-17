@@ -60,8 +60,20 @@ test('yeni v3.0 ayarları doğru doğrulanır ve sınırlandırılır', () => {
   // Boolean toggles
   assert.equal(sanitizeSettingValue('freezeDetection', true), true);
   assert.equal(sanitizeSettingValue('freezeDetection', 0), false);
+  assert.equal(sanitizeSettingValue('dropFrameSentinel', true), true);
+  assert.equal(sanitizeSettingValue('dropFrameSentinel', false), false);
+  assert.equal(sanitizeSettingValue('ultraEco', true), true);
+  assert.equal(sanitizeSettingValue('ultraEco', 0), false);
   assert.equal(sanitizeSettingValue('multiZone', 1), true);
   assert.equal(sanitizeSettingValue('dynamicAccent', true), true);
   assert.equal(sanitizeSettingValue('barFill', true), true);
   assert.equal(sanitizeSettingValue('autoSubtitleDim', true), true);
+
+  // buttonPosition: left veya right
+  assert.equal(sanitizeSettingValue('buttonPosition', 'left'), 'left');
+  assert.equal(sanitizeSettingValue('buttonPosition', 'right'), 'right');
+  assert.equal(sanitizeSettingValue('buttonPosition', 'center'), DEFAULT_SETTINGS.buttonPosition);
+  assert.equal(DEFAULT_SETTINGS.buttonPosition, 'left');
+  assert.equal(DEFAULT_SETTINGS.dropFrameSentinel, true);
+  assert.equal(DEFAULT_SETTINGS.ultraEco, false);
 });

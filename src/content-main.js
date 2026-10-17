@@ -39,7 +39,10 @@ import { PlayerUI } from './player-ui.js';
         settingsManager.onChange((newSettings) => {
           i18n.setLanguage(newSettings.language || 'tr');
           if (this.ambientEngine) this.ambientEngine.applySettings(newSettings);
-          if (this.playerUI) this.playerUI.updateButtonState();
+          if (this.playerUI) {
+            this.playerUI.updateButtonState();
+            this.playerUI.mountButton();
+          }
         });
 
         // Popup veya arka plandan gelen doğrudan mesajları dinle
@@ -49,7 +52,10 @@ import { PlayerUI } from './player-ui.js';
               settingsManager.load().then((updated) => {
                 i18n.setLanguage(updated.language || 'tr');
                 if (this.ambientEngine) this.ambientEngine.applySettings(updated);
-                if (this.playerUI) this.playerUI.updateButtonState();
+                if (this.playerUI) {
+                  this.playerUI.updateButtonState();
+                  this.playerUI.mountButton();
+                }
               });
             }
           });

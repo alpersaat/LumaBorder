@@ -5,8 +5,9 @@
 
 import { settingsManager } from '../src/settings.js';
 import { i18n, translations } from '../src/i18n.js';
+import { computePopupBatteryView, computeStatusView } from '../src/battery-ui.js';
 
-class PopupController {
+export class PopupController {
   constructor() {
     this.elements = {};
     this.init();
@@ -46,6 +47,8 @@ class PopupController {
       chkDynamicAccent: document.getElementById('chk-dynamic-accent'),
       chkAutoSubDim: document.getElementById('chk-auto-sub-dim'),
       chkFreeze: document.getElementById('chk-freeze'),
+      chkDropSentinel: document.getElementById('chk-drop-sentinel'),
+      chkUltraEco: document.getElementById('chk-ultra-eco'),
       chkLetterbox: document.getElementById('chk-letterbox'),
       chkPillarbox: document.getElementById('chk-pillarbox'),
       chkBatteryEco: document.getElementById('chk-battery-eco'),
@@ -57,6 +60,7 @@ class PopupController {
       colorDots: document.querySelectorAll('.color-dot'),
       colorPicker: document.getElementById('popup-color-picker'),
       fpsButtons: document.querySelectorAll('.fps-mode-btn'),
+      btnPosButtons: document.querySelectorAll('#btn-popup-pos-left, #btn-popup-pos-right'),
       batteryBadge: document.getElementById('popup-battery-badge'),
       batteryIcon: document.getElementById('popup-battery-icon'),
       batteryText: document.getElementById('popup-battery-text')
@@ -75,6 +79,12 @@ class PopupController {
       const el = document.getElementById(`txt-${key}`);
       if (el) el.textContent = trans[key];
     }
+
+    // Buton konumu çevirileri
+    const btnPosLeft = document.getElementById('btn-popup-pos-left');
+    const btnPosRight = document.getElementById('btn-popup-pos-right');
+    if (btnPosLeft) btnPosLeft.textContent = i18n.t('btnPosLeft');
+    if (btnPosRight) btnPosRight.textContent = i18n.t('btnPosRight');
 
     // Bias modu buton çevirileri
     const btnBiasOff = document.getElementById('btn-bias-off');
@@ -97,10 +107,9 @@ class PopupController {
   }
 
   updateStatusText() {
-    const enabled = settingsManager.current.enabled;
-    const activeText = i18n.t(enabled ? 'statusActive' : 'statusInactive');
-    this.elements.statusText.textContent = activeText;
-    this.elements.statusIndicator.classList.toggle('inactive', !enabled);
+    const view = computeStatusView(settingsManager.current.enabled, i18n.t.bind(i18n));
+    this.elements.statusText.textContent = view.text;
+    this.elements.statusIndicator.classList.toggle('inactive', view.inactive);
   }
 
   renderSettingsValues() {
@@ -131,6 +140,8 @@ class PopupController {
     if (this.elements.chkDynamicAccent) this.elements.chkDynamicAccent.checked = s.dynamicAccent;
     if (this.elements.chkAutoSubDim) this.elements.chkAutoSubDim.checked = s.autoSubtitleDim;
     if (this.elements.chkFreeze) this.elements.chkFreeze.checked = s.freezeDetection;
+    if (this.elements.chkDropSentinel) this.elements.chkDropSentinel.checked = s.dropFrameSentinel;
+    if (this.elements.chkUltraEco) this.elements.chkUltraEco.checked = s.ultraEco;
     if (this.elements.chkLetterbox) this.elements.chkLetterbox.checked = s.letterboxDetection;
     if (this.elements.chkPillarbox) this.elements.chkPillarbox.checked = s.pillarboxDetection;
     if (this.elements.chkBatteryEco) this.elements.chkBatteryEco.checked = s.autoBatteryEco;
@@ -138,6 +149,9 @@ class PopupController {
 
     // FPS Modu
     this.updateFpsModeUI(s.targetFps || 'sync');
+
+    // Buton Konumu
+    this.updateButtonPositionUI(s.buttonPosition || 'left');
 
     // Bias Lighting Mode
     this.updateBiasModeUI(s.biasLightingMode || 'off');
@@ -150,6 +164,12 @@ class PopupController {
     });
 
     this.updateActivePresetPill(s.activePreset);
+  }
+
+  updateButtonPositionUI(pos) {
+    this.elements.btnPosButtons.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.btnpos === pos);
+    });
   }
 
   updateFpsModeUI(fps) {
@@ -184,8 +204,9 @@ class PopupController {
     // Master Switch
     this.elements.masterToggle.addEventListener('change', async (e) => {
       const enabled = e.target.checked;
-      await settingsManager.save({ enabled });
+      settingsManager.current.enabled = enabled;
       this.updateStatusText();
+      await settingsManager.save({ enabled });
       this.notifyActiveTab();
     });
 
@@ -245,6 +266,8 @@ class PopupController {
     bindCheckbox(this.elements.chkDynamicAccent, 'dynamicAccent');
     bindCheckbox(this.elements.chkAutoSubDim, 'autoSubtitleDim');
     bindCheckbox(this.elements.chkFreeze, 'freezeDetection');
+    bindCheckbox(this.elements.chkDropSentinel, 'dropFrameSentinel');
+    bindCheckbox(this.elements.chkUltraEco, 'ultraEco');
     bindCheckbox(this.elements.chkLetterbox, 'letterboxDetection');
     bindCheckbox(this.elements.chkPillarbox, 'pillarboxDetection');
     bindCheckbox(this.elements.chkBatteryEco, 'autoBatteryEco', () => {
@@ -257,8 +280,18 @@ class PopupController {
       btn.addEventListener('click', async () => {
         const fps = btn.dataset.fps;
         this.updateFpsModeUI(fps);
-        await settingsManager.save({ targetFps: fps, activePreset: 'custom' });
         this.updateActivePresetPill('custom');
+        await settingsManager.save({ targetFps: fps, activePreset: 'custom' });
+        this.notifyActiveTab();
+      });
+    });
+
+    // Buton Konumu Butonları
+    this.elements.btnPosButtons.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const pos = btn.dataset.btnpos;
+        this.updateButtonPositionUI(pos);
+        await settingsManager.save({ buttonPosition: pos });
         this.notifyActiveTab();
       });
     });
@@ -321,33 +354,35 @@ class PopupController {
 
   updateBatteryUI() {
     if (!this.elements.batteryBadge) return;
+
     if (!this.battery) {
-      if (this.elements.batteryText) {
-        this.elements.batteryText.textContent = `${i18n.t('batteryStatusTitle')}: ${i18n.t('batteryNotSupported')}`;
-      }
-      if (this.elements.batteryIcon) this.elements.batteryIcon.textContent = '🔌';
+      const view = computePopupBatteryView({ supported: false }, settingsManager.current.autoBatteryEco, i18n.t.bind(i18n));
+      if (this.elements.batteryText) this.elements.batteryText.textContent = view.text;
+      if (this.elements.batteryIcon) this.elements.batteryIcon.textContent = view.icon;
       return;
     }
 
-    const charging = this.battery.charging;
-    const level = Math.round(this.battery.level * 100);
-    const isEco = settingsManager.current.autoBatteryEco && !charging && level <= 20;
+    const view = computePopupBatteryView(
+      { supported: true, charging: this.battery.charging, level: Math.round(this.battery.level * 100) },
+      settingsManager.current.autoBatteryEco,
+      i18n.t.bind(i18n)
+    );
 
-    this.elements.batteryBadge.classList.toggle('eco-active', isEco);
-    this.elements.batteryBadge.classList.toggle('charging', charging);
+    this.elements.batteryBadge.classList.toggle('eco-active', view.ecoActive);
+    this.elements.batteryBadge.classList.toggle('charging', view.charging);
+    this.setBatteryEcoDisabled(false);
 
-    if (this.elements.batteryIcon) {
-      this.elements.batteryIcon.textContent = charging ? '⚡' : (level <= 20 ? '🪫' : '🔋');
-    }
+    if (this.elements.batteryIcon) this.elements.batteryIcon.textContent = view.icon;
+    if (this.elements.batteryText) this.elements.batteryText.textContent = view.text;
+  }
 
-    if (this.elements.batteryText) {
-      if (isEco) {
-        this.elements.batteryText.textContent = `%${level} • ${i18n.t('batteryEcoActiveBadge')}`;
-      } else if (charging) {
-        this.elements.batteryText.textContent = `%${level} (${i18n.t('batteryCharging')})`;
-      } else {
-        this.elements.batteryText.textContent = `%${level} (${i18n.t('batteryDischarging')})`;
-      }
+  setBatteryEcoDisabled(disabled) {
+    const chk = this.elements.chkBatteryEco;
+    if (!chk) return;
+    chk.disabled = disabled;
+    if (disabled && chk.checked) {
+      chk.checked = false;
+      settingsManager.save({ autoBatteryEco: false });
     }
   }
 

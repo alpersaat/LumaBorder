@@ -2,7 +2,10 @@
  * LumaBorder - Audio-Reactive Beat Pulsing Engine
  * Web Audio API (AudioContext & AnalyserNode) tabanlı bas ve ritim tespiti
  * Müzik ve ritmik videolarda ortam ışığını bas vuruşlarıyla hafifçe nabız gibi attırır.
+ * Saf nabız matematiği src/beat-detect.js içindedir.
  */
+
+import { computePulse } from './beat-detect.js';
 
 export class AudioReactiveEngine {
   constructor(videoElem, options = {}) {
@@ -91,29 +94,13 @@ export class AudioReactiveEngine {
     try {
       this.analyser.getByteFrequencyData(this.dataArray);
 
-      // Bas frekansları: 20Hz - 150Hz (ilk 4-6 bin)
-      const bassBins = Math.min(6, this.dataArray.length);
-      let bassEnergy = 0;
-      for (let i = 0; i < bassBins; i++) {
-        bassEnergy += this.dataArray[i];
-      }
-      bassEnergy = bassEnergy / bassBins; // 0 - 255
-
-      // Dinamik eşik ve hareketli ortalama
-      this.bassAverage = this.bassAverage * 0.92 + bassEnergy * 0.08;
-
-      // Hassasiyet çarpanı
-      const sensFactor = 1.1 + (100 - this.sensitivity) * 0.005; // 1.1 - 1.55
-      const threshold = Math.max(35, this.bassAverage * sensFactor);
-
-      if (bassEnergy > threshold && bassEnergy > 45) {
-        // Vuruş (Beat detected)
-        const punch = Math.min(0.25, ((bassEnergy - threshold) / 255) * (this.sensitivity / 50) * 0.35);
-        this.currentPulse = Math.max(this.currentPulse, 1.0 + punch);
-      } else {
-        // Yumuşak sönümleme (Exponential decay)
-        this.currentPulse = Math.max(1.0, this.currentPulse * 0.94);
-      }
+      const result = computePulse(
+        { currentPulse: this.currentPulse, bassAverage: this.bassAverage },
+        this.dataArray,
+        this.sensitivity
+      );
+      this.currentPulse = result.currentPulse;
+      this.bassAverage = result.bassAverage;
     } catch (e) {
       this.currentPulse = 1.0;
     }

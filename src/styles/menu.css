@@ -22,6 +22,13 @@
   user-select: none;
   animation: lumaBorderFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
+  transform-origin: bottom right;
+}
+
+.lumaborder-menu-overlay.lumaborder-menu-left {
+  right: auto;
+  left: 16px;
+  transform-origin: bottom left;
 }
 
 @keyframes lumaBorderFadeIn {

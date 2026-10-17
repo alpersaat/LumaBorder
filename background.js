@@ -24,7 +24,34 @@ const INITIAL_SETTINGS = {
   theaterModeSync: true,
   fullScreenSync: true,
   activePreset: 'default',
-  language: 'tr'
+  language: 'tr',
+  renderEngine: 'webgl',
+  freezeDetection: true,
+  colorSpace: 'display-p3',
+  hdrTonemap: true,
+  edgeTop: true,
+  edgeRight: true,
+  edgeBottom: true,
+  edgeLeft: true,
+  edgeTopSpread: 100,
+  edgeRightSpread: 100,
+  edgeBottomSpread: 100,
+  edgeLeftSpread: 100,
+  multiZone: false,
+  zoneCount: 12,
+  barFill: false,
+  debanding: true,
+  colorTemperature: 6500,
+  autoSubtitleDim: true,
+  audioReactive: false,
+  audioSensitivity: 50,
+  nightShiftEnabled: false,
+  nightShiftStart: '22:00',
+  nightShiftEnd: '07:00',
+  dynamicAccent: false,
+  buttonPosition: 'left',
+  dropFrameSentinel: true,
+  ultraEco: false
 };
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -36,7 +63,11 @@ chrome.runtime.onInstalled.addListener(() => {
       });
       return;
     }
-    chrome.storage.sync.set({ ...INITIAL_SETTINGS, ...items });
+    chrome.storage.sync.set({ ...INITIAL_SETTINGS, ...items }, () => {
+      if (!chrome.runtime.lastError) {
+        chrome.storage.local.remove(Object.keys(INITIAL_SETTINGS));
+      }
+    });
   });
 });
 
@@ -46,9 +77,10 @@ chrome.commands.onCommand.addListener((command) => {
   chrome.storage.sync.get(['enabled'], (syncRes) => {
     const syncVal = chrome.runtime.lastError ? undefined : syncRes?.enabled;
     chrome.storage.local.get(['enabled'], (localRes) => {
-      // local (sync yazımı başarısız olduğunda tutulur) sync'i ezer
+      // local yalnızca sync yazılamadığında tutulan yedektir; okumada sync'e göre değildir
       const localVal = chrome.runtime.lastError ? undefined : localRes?.enabled;
-      const currentState = localVal !== undefined ? localVal : (syncVal !== undefined ? syncVal : true);
+      // sync tek kaynaktır; local yalnızca sync yazılamadığında tutulan yedektir
+      const currentState = syncVal !== undefined ? syncVal : (localVal !== undefined ? localVal : true);
       const nextState = !currentState;
       chrome.storage.sync.set({ enabled: nextState }, () => {
         if (chrome.runtime.lastError) {

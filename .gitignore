@@ -26,4 +26,6 @@ build/
 _ref/
 node_modules/
 .tmp-package/
+.playwright-cli/
+
 

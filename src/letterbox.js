@@ -32,21 +32,43 @@ export function analyzeLetterbox(imgData, w, h, { checkLetterbox = true, checkPi
     return true;
   };
 
+  // Hızlı Kenar Kontrolü (Fast-Path): En dış kenarlar siyah değilse tüm taramaları atla
+  const topBlack = checkLetterbox && rowBlack(0);
+  const bottomBlack = checkLetterbox && rowBlack(h - 1);
+  const leftBlack = checkPillarbox && !isShorts && colBlack(0);
+  const rightBlack = checkPillarbox && !isShorts && colBlack(w - 1);
+
+  if (!topBlack && !bottomBlack && !leftBlack && !rightBlack) {
+    return { ...ZERO_CROP };
+  }
+
   const crop = { ...ZERO_CROP };
   if (checkLetterbox) {
-    for (let y = 0; y < Math.floor(h / 3); y++) {
-      if (rowBlack(y)) crop.top = (y + 1) / h; else break;
+    if (topBlack) {
+      crop.top = 1 / h;
+      for (let y = 1; y < Math.floor(h / 3); y++) {
+        if (rowBlack(y)) crop.top = (y + 1) / h; else break;
+      }
     }
-    for (let y = h - 1; y >= Math.floor(h * 0.66); y--) {
-      if (rowBlack(y)) crop.bottom = (h - y) / h; else break;
+    if (bottomBlack) {
+      crop.bottom = 1 / h;
+      for (let y = h - 2; y >= Math.floor(h * 0.66); y--) {
+        if (rowBlack(y)) crop.bottom = (h - y) / h; else break;
+      }
     }
   }
   if (checkPillarbox && !isShorts) {
-    for (let x = 0; x < Math.floor(w / 3); x++) {
-      if (colBlack(x)) crop.left = (x + 1) / w; else break;
+    if (leftBlack) {
+      crop.left = 1 / w;
+      for (let x = 1; x < Math.floor(w / 3); x++) {
+        if (colBlack(x)) crop.left = (x + 1) / w; else break;
+      }
     }
-    for (let x = w - 1; x >= Math.floor(w * 0.66); x--) {
-      if (colBlack(x)) crop.right = (w - x) / w; else break;
+    if (rightBlack) {
+      crop.right = 1 / w;
+      for (let x = w - 2; x >= Math.floor(w * 0.66); x--) {
+        if (colBlack(x)) crop.right = (w - x) / w; else break;
+      }
     }
   }
   return crop;

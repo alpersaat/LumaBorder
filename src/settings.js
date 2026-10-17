@@ -45,7 +45,9 @@ export const PRESETS = {
     nightShiftEnabled: false,
     nightShiftStart: '22:00',
     nightShiftEnd: '07:00',
-    dynamicAccent: false
+    dynamicAccent: false,
+    dropFrameSentinel: true,
+    ultraEco: false
   },
   cinema: {
     brightness: 85,
@@ -88,7 +90,9 @@ export const PRESETS = {
     nightShiftEnabled: false,
     nightShiftStart: '22:00',
     nightShiftEnd: '07:00',
-    dynamicAccent: false
+    dynamicAccent: false,
+    dropFrameSentinel: true,
+    ultraEco: false
   },
   vibrant: {
     brightness: 130,
@@ -131,7 +135,9 @@ export const PRESETS = {
     nightShiftEnabled: false,
     nightShiftStart: '22:00',
     nightShiftEnd: '07:00',
-    dynamicAccent: true
+    dynamicAccent: true,
+    dropFrameSentinel: true,
+    ultraEco: false
   },
   night: {
     brightness: 60,
@@ -174,7 +180,9 @@ export const PRESETS = {
     nightShiftEnabled: false,
     nightShiftStart: '22:00',
     nightShiftEnd: '07:00',
-    dynamicAccent: false
+    dynamicAccent: false,
+    dropFrameSentinel: true,
+    ultraEco: true
   },
   gaming: {
     brightness: 115,
@@ -217,7 +225,9 @@ export const PRESETS = {
     nightShiftEnabled: false,
     nightShiftStart: '22:00',
     nightShiftEnd: '07:00',
-    dynamicAccent: true
+    dynamicAccent: true,
+    dropFrameSentinel: true,
+    ultraEco: false
   }
 };
 
@@ -268,7 +278,11 @@ export const DEFAULT_SETTINGS = {
   nightShiftEnabled: false,
   nightShiftStart: '22:00',
   nightShiftEnd: '07:00',
-  dynamicAccent: false
+  dynamicAccent: false,
+  buttonPosition: 'left',
+  // Performans Odaklı Yenilikler
+  dropFrameSentinel: true,
+  ultraEco: false
 };
 
 export function sanitizeSettingValue(key, value) {
@@ -337,6 +351,9 @@ export function sanitizeSettingValue(key, value) {
     case 'activePreset': {
       return typeof value === 'string' ? value.slice(0, 30) : 'default';
     }
+    case 'buttonPosition': {
+      return ['left', 'right'].includes(value) ? value : DEFAULT_SETTINGS.buttonPosition;
+    }
     default: {
       if (typeof DEFAULT_SETTINGS[key] === 'boolean') {
         return Boolean(value);
@@ -361,13 +378,49 @@ export class SettingsManager {
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync) {
         const readArea = (area, defaults) => new Promise((res) => {
           try {
-            chrome.storage[area].get(defaults, (items) => res(chrome.runtime.lastError ? {} : (items || {})));
-          } catch (e) { res({}); }
+            chrome.storage[area].get(defaults, (items) => res({ ok: !chrome.runtime.lastError, items: items || {} }));
+          } catch (e) { res({ ok: false, items: {} }); }
         });
-        // local, sync yazımı başarısız olduğunda tutulan daha yeni değerleri içerir → sync'i ezer
-        Promise.all([readArea('sync', DEFAULT_SETTINGS), readArea('local', {})]).then(([sync, local]) => {
-          this.current = this.sanitizeAll({ ...DEFAULT_SETTINGS, ...sync, ...local });
-          resolve(this.current);
+        // Tek kaynak: chrome.storage.sync. local sadece sync kullanılamadığı zaman yedektir;
+        // asla sync'in üzerine yazılmaz. Yereldeki tek-kuvar değerler ilk yüklemede sync'e tohumlanır.
+        Promise.all([readArea('sync', DEFAULT_SETTINGS), readArea('local', {})]).then(([syncRes, localRes]) => {
+          const { ok: syncOk, items: sync } = syncRes;
+          const { ok: localOk, items: local } = localRes;
+          const merged = { ...DEFAULT_SETTINGS, ...sync };
+          const toSync = {};
+          for (const key of Object.keys(local)) {
+            if (!(key in DEFAULT_SETTINGS)) continue;
+            const syncVal = sync[key];
+            const localVal = local[key];
+            if (localVal !== DEFAULT_SETTINGS[key] && (syncVal === undefined || syncVal === DEFAULT_SETTINGS[key])) {
+              toSync[key] = sanitizeSettingValue(key, localVal);
+              merged[key] = toSync[key];
+            }
+          }
+          const localKeys = Object.keys(local).filter(k => k in DEFAULT_SETTINGS);
+          const apply = () => {
+            this.current = this.sanitizeAll(merged);
+            resolve(this.current);
+          };
+          if (syncOk && Object.keys(toSync).length) {
+            chrome.storage.sync.set(toSync, () => {
+              if (!chrome.runtime.lastError) {
+                if (localKeys.length) chrome.storage.local.remove(localKeys, apply);
+                else apply();
+              } else {
+                // sync yazılamadı: yerel yedek tutulur, sonraki senkron denemesinde tohumlanır
+                apply();
+              }
+            });
+          } else if (syncOk) {
+            // sync kaynağıdır; eski local override anahtarlarını temizle
+            if (localKeys.length) chrome.storage.local.remove(localKeys, apply);
+            else apply();
+          } else {
+            // sync yok: yerel depolama tek kaynaktır
+            this.current = this.sanitizeAll({ ...DEFAULT_SETTINGS, ...local });
+            resolve(this.current);
+          }
         });
       } else {
         try {

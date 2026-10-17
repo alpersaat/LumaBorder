@@ -7,7 +7,20 @@
 import { analyzeLetterbox, checkDirtyFrame } from './letterbox.js';
 import { WebGLEngine } from './webgl-engine.js';
 import { AudioReactiveEngine } from './audio-reactive.js';
-import { kelvinToRGB, isTimeInWindow, extractDominantAccentColor, sampleMultiZoneColors } from './color-utils.js';
+import { kelvinToRGB, extractDominantAccentColor, sampleMultiZoneColors } from './color-utils.js';
+import {
+  getCanvasDimensions,
+  getAnalysisCanvasSize,
+  computeLayerStyles,
+  computeEdgeWeights,
+  computeBottomMask,
+  computeSourceRect,
+  computeBarFillPixels,
+  resolveEffectiveFps,
+  getMaxBlurPasses,
+  createDropSentinel,
+  stepDropSentinel
+} from './render-config.js';
 
 export class AmbientEngine {
   constructor(videoElem, playerElem, settings) {
@@ -71,11 +84,21 @@ export class AmbientEngine {
     // Dinamik Tema Vurgusu (Accent Tint)
     this.currentAccentColor = '#ff9100';
 
+    // Drop-Frame Sentinel (Kare Düşüşü Koruması - Item 2)
+    this.dropSentinel = createDropSentinel();
+
+    // DOM Reflow Koruması için Önbellekler (Item 4)
+    this._lastAudioPulse = 1.0;
+    this._lastBarPx = { top: -1, bottom: -1, left: -1, right: -1 };
+    this._lastMaskStr = '';
+    this._lastAccentApplied = false;
+
     this.isShorts = location.pathname.startsWith('/shorts') ||
       Boolean(this.player.closest('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
 
-    this.canvasWidth = this.isShorts ? 108 : 192;
-    this.canvasHeight = this.isShorts ? 192 : 108;
+    const dims = getCanvasDimensions(this.isShorts, this.settings.ultraEco);
+    this.canvasWidth = dims.width;
+    this.canvasHeight = dims.height;
 
     this.initDOM();
     this.initEngines();
@@ -84,6 +107,24 @@ export class AmbientEngine {
     this.initSubtitleObserver();
     this.applySettings(this.settings);
     this.bindEvents();
+  }
+
+  updateCanvasSizes() {
+    if (this.canvasDiffuse) {
+      this.canvasDiffuse.width = this.canvasWidth;
+      this.canvasDiffuse.height = this.canvasHeight;
+      if (this.webglEngine) {
+        this.webglEngine.resize(this.canvasWidth, this.canvasHeight);
+      }
+    }
+    if (this.canvasTight) {
+      this.canvasTight.width = this.canvasWidth;
+      this.canvasTight.height = this.canvasHeight;
+    }
+    if (this.canvasMultiZone) {
+      this.canvasMultiZone.width = this.canvasWidth;
+      this.canvasMultiZone.height = this.canvasHeight;
+    }
   }
 
   initDOM() {
@@ -190,8 +231,7 @@ export class AmbientEngine {
     } catch (e) {}
 
     // Letterbox & Pillarbox analiz tuvali (Shorts için 9:16 = 18x32, Standart için 16:9 = 32x18)
-    const aW = this.isShorts ? 18 : 32;
-    const aH = this.isShorts ? 32 : 18;
+    const { width: aW, height: aH } = getAnalysisCanvasSize(this.isShorts);
     if (typeof OffscreenCanvas !== 'undefined') {
       try {
         this.analysisCanvas = new OffscreenCanvas(aW, aH);
@@ -259,12 +299,34 @@ export class AmbientEngine {
     if (!this.settings.workerRender || typeof Worker === 'undefined') return;
     try {
       if (typeof chrome === 'undefined' || !chrome.runtime?.getURL) return;
-      const res = await fetch(chrome.runtime.getURL('src/render-worker.js'));
-      const code = await res.text();
-      if (this.destroyed) return;
+      const workerUrl = chrome.runtime.getURL('src/render-worker.js');
+      let workerInstance = null;
 
-      this.workerBlobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
-      this.worker = new Worker(this.workerBlobUrl);
+      // 1. Önce doğrudan web_accessible URL ile başlatmayı dene
+      try {
+        workerInstance = new Worker(workerUrl);
+      } catch (directErr) {
+        // 2. CSP izin veriyorsa Blob fallback dene
+        try {
+          const res = await fetch(workerUrl);
+          const code = await res.text();
+          if (this.destroyed) return;
+          this.workerBlobUrl = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+          workerInstance = new Worker(this.workerBlobUrl);
+        } catch (blobErr) {
+          this.disposeWorker();
+          return;
+        }
+      }
+
+      if (!workerInstance || this.destroyed) {
+        if (workerInstance) {
+          try { workerInstance.terminate(); } catch (e) {}
+        }
+        return;
+      }
+
+      this.worker = workerInstance;
       this.worker.onmessage = (e) => {
         const { type, crop, isDirty, dominantColor } = e.data || {};
         if (type === 'READY') {
@@ -283,12 +345,13 @@ export class AmbientEngine {
         }
       };
       this.worker.onerror = (e) => {
-        this.warnOnce('worker', e && e.message);
+        if (e && typeof e.preventDefault === 'function') {
+          e.preventDefault();
+        }
         this.disposeWorker();
       };
       this.worker.postMessage({ type: 'INIT', data: {} });
     } catch (e) {
-      this.warnOnce('worker-init', e);
       this.disposeWorker();
     }
   }
@@ -332,15 +395,17 @@ export class AmbientEngine {
         updateBatteryStatus();
       }).catch(() => {
         this.batteryInfo.supported = false;
+        this.notifyBatteryListeners();
       });
+    } else {
+      this.batteryInfo.supported = false;
+      this.notifyBatteryListeners();
     }
   }
 
   onBatteryChange(cb) {
     this.batteryCallbacks.add(cb);
-    if (this.batteryInfo.supported) {
-      cb(this.batteryInfo);
-    }
+    cb(this.batteryInfo);
     return () => this.batteryCallbacks.delete(cb);
   }
 
@@ -372,7 +437,7 @@ export class AmbientEngine {
     this._warned = this._warned || {};
     if (this._warned[tag]) return;
     this._warned[tag] = true;
-    console.warn(`[LumaBorder] ${tag} hatası:`, err);
+    console.warn('[LumaBorder]', tag, 'hatası:', err);
   }
 
   bindEvents() {
@@ -446,6 +511,17 @@ export class AmbientEngine {
 
     this.container.style.display = 'block';
 
+    // Ultra-Eco Çözünürlük Geçişi Kontrolü (Item 6)
+    const oldW = this.canvasWidth;
+    const oldH = this.canvasHeight;
+    const dims = getCanvasDimensions(this.isShorts, this.settings.ultraEco);
+    this.canvasWidth = dims.width;
+    this.canvasHeight = dims.height;
+
+    if (oldW !== this.canvasWidth || oldH !== this.canvasHeight) {
+      this.updateCanvasSizes();
+    }
+
     // Katman görünürlükleri
     if (this.canvasTight) {
       this.canvasTight.style.display = this.settings.dualLayerGlow ? 'block' : 'none';
@@ -467,42 +543,21 @@ export class AmbientEngine {
     }
 
     // Sirkadiyen Ritim / Gece Karartması Kontrolü (Item 3.3)
-    let effectiveBrightness = this.settings.brightness;
-    let effectiveKelvin = this.settings.colorTemperature || 6500;
-    if (this.settings.nightShiftEnabled) {
-      const isNight = isTimeInWindow(new Date(), this.settings.nightShiftStart, this.settings.nightShiftEnd);
-      if (isNight) {
-        effectiveBrightness = Math.round(effectiveBrightness * 0.65);
-        effectiveKelvin = Math.min(3200, effectiveKelvin);
-      }
-    }
+    const styles = computeLayerStyles(this.settings, { isShorts: this.isShorts });
 
-    this.effectiveBrightness = effectiveBrightness;
-    this.effectiveKelvin = effectiveKelvin;
+    this.effectiveBrightness = styles.effectiveBrightness;
+    this.effectiveKelvin = styles.effectiveKelvin;
 
-    const brightness = (effectiveBrightness / 100).toFixed(2);
-    const contrast = (this.settings.contrast / 100).toFixed(2);
-    const saturate = (this.settings.saturation / 100).toFixed(2);
-    const blur = Math.max(10, this.settings.blur);
-    
-    let scaleX, scaleY, tightScaleX, tightScaleY;
-    if (this.isShorts) {
-      const spreadRatio = this.settings.spread / 100;
-      scaleX = (1.30 + (spreadRatio * 0.40)).toFixed(2);
-      scaleY = (1.02 + (spreadRatio * 0.05)).toFixed(2);
-      tightScaleX = (1.10 + (spreadRatio * 0.15)).toFixed(2);
-      tightScaleY = (1.01 + (spreadRatio * 0.02)).toFixed(2);
-    } else {
-      const spreadMultiplier = 1 + (this.settings.spread / 100);
-      scaleX = spreadMultiplier.toFixed(2);
-      scaleY = spreadMultiplier.toFixed(2);
-      const tightScale = Math.min(1.15, 1 + (this.settings.spread / 400)).toFixed(2);
-      tightScaleX = tightScale;
-      tightScaleY = tightScale;
-    }
-
-    const tightBlur = Math.max(8, Math.round(blur * 0.35));
-    const smoothingSec = (this.settings.smoothing / 100) * 0.25;
+    const brightness = styles.brightness;
+    const contrast = styles.contrast;
+    const saturate = styles.saturate;
+    const blur = styles.blur;
+    const scaleX = styles.scaleX;
+    const scaleY = styles.scaleY;
+    const tightScaleX = styles.tightScaleX;
+    const tightScaleY = styles.tightScaleY;
+    const tightBlur = styles.tightBlur;
+    const smoothingSec = styles.smoothingSec;
 
     // CSS Değişkenleri üzerinden GPU filtreleri
     this.container.style.setProperty('--lumaborder-blur', `${blur}px`);
@@ -545,24 +600,21 @@ export class AmbientEngine {
     this.container.classList.toggle('edge-bottom-off', !this.settings.edgeBottom);
 
     // Altyazı Koruması (Item 2.6 ve Statik bottomFade)
-    const isSubActive = this.settings.autoSubtitleDim && this.isSubtitleVisible;
-    const isBottomFadeActive = this.settings.bottomFade || isSubActive;
-
-    if (isBottomFadeActive) {
-      const strength = isSubActive ? 75 : Number(this.settings.bottomFadeStrength || 60);
-      const bottomAlpha = Math.max(0, (1 - (strength / 100))).toFixed(2);
-      const maskGradient = `linear-gradient(to bottom, #000 0%, #000 65%, rgba(0,0,0,${bottomAlpha}) 100%)`;
+    const maskGradient = computeBottomMask(this.settings, this.isSubtitleVisible);
+    if (this._lastMaskStr !== maskGradient) {
+      this._lastMaskStr = maskGradient;
       this.container.style.setProperty('--lumaborder-bottom-mask', maskGradient);
-    } else {
-      this.container.style.setProperty('--lumaborder-bottom-mask', 'none');
     }
   }
 
   applyDynamicAccent(hexColor) {
     if (!this.player || !hexColor) return;
+    const active = Boolean(this.settings.dynamicAccent);
+    if (this.currentAccentColor === hexColor && this._lastAccentApplied === active) return;
     this.currentAccentColor = hexColor;
+    this._lastAccentApplied = active;
     this.player.style.setProperty('--lumaborder-accent-color', hexColor);
-    this.player.classList.toggle('lumaborder-tint-active', Boolean(this.settings.dynamicAccent));
+    this.player.classList.toggle('lumaborder-tint-active', active);
   }
 
   drawBiasLighting() {
@@ -609,6 +661,25 @@ export class AmbientEngine {
     }
   }
 
+  updateDropFrameSentinel() {
+    if (!this.settings.dropFrameSentinel || !this.video || typeof this.video.getVideoPlaybackQuality !== 'function') {
+      return;
+    }
+    const now = performance.now();
+    if (now - this.dropSentinel.lastCheckTime < 2000) return;
+    this.dropSentinel.lastCheckTime = now;
+
+    try {
+      const quality = this.video.getVideoPlaybackQuality();
+      if (!quality) return;
+
+      const dropped = quality.droppedVideoFrames || 0;
+      const total = quality.totalVideoFrames || 0;
+
+      stepDropSentinel(this.dropSentinel, { dropped, total });
+    } catch (e) {}
+  }
+
   renderLoop() {
     if (this.destroyed || !this.isRunning || !this.settings.enabled) return;
 
@@ -631,15 +702,15 @@ export class AmbientEngine {
       }
     };
 
-    // FPS Limiti & Akıllı Eko
-    const effectiveFps = (this.isBatteryEcoActive && this.settings.autoBatteryEco)
-      ? 30
-      : this.settings.targetFps;
+    // Drop-Frame Sentinel Kontrolü (Item 2)
+    this.updateDropFrameSentinel();
 
-    // Statik Sahne / Freeze Durumunda 1 FPS'e düşür (Item 1.2)
-    const activeTargetFps = (this.isFrameFrozen && this.settings.freezeDetection)
-      ? 1
-      : (effectiveFps && effectiveFps !== 'sync' ? Number(effectiveFps) || 60 : null);
+    // FPS Limiti & Akıllı Eko & Drop-Frame Sentinel
+    const activeTargetFps = resolveEffectiveFps(this.settings, {
+      isBatteryEcoActive: this.isBatteryEcoActive,
+      penaltyLevel: this.dropSentinel.penaltyLevel,
+      isFrameFrozen: this.isFrameFrozen
+    });
 
     if (activeTargetFps) {
       const intervalMs = 1000 / activeTargetFps;
@@ -668,9 +739,12 @@ export class AmbientEngine {
     }
 
     const now = performance.now();
-    const checkInterval = (this.isBatteryEcoActive && this.settings.autoBatteryEco)
+    const isFrozen = this.isFrameFrozen && this.settings.freezeDetection;
+    const checkInterval = isFrozen
       ? 4000
-      : (this.settings.ecoMode ? 2000 : 1200);
+      : ((this.isBatteryEcoActive && this.settings.autoBatteryEco)
+          ? 4000
+          : (this.settings.ecoMode ? 2000 : 1200));
 
     if (now - this.lastAnalysisTime < checkInterval) return;
     this.lastAnalysisTime = now;
@@ -678,8 +752,7 @@ export class AmbientEngine {
     // Worker üzerinden analiz (Item 1.3 ve 1.4)
     if (this.settings.workerRender && this.worker && this.isWorkerReady && !this.isAnalyzingInWorker && typeof createImageBitmap === 'function') {
       this.isAnalyzingInWorker = true;
-      const resizeW = this.isShorts ? 18 : 32;
-      const resizeH = this.isShorts ? 32 : 18;
+      const { width: resizeW, height: resizeH } = getAnalysisCanvasSize(this.isShorts);
       try {
         createImageBitmap(this.video, { resizeWidth: resizeW, resizeHeight: resizeH, resizeQuality: 'low' })
           .then((bitmap) => {
@@ -789,15 +862,24 @@ export class AmbientEngine {
     const playerRect = this.player?.getBoundingClientRect();
     if (!playerRect) return;
 
-    const topPx = Math.round(playerRect.height * this.letterboxCrop.top);
-    const bottomPx = Math.round(playerRect.height * this.letterboxCrop.bottom);
-    const leftPx = Math.round(playerRect.width * this.letterboxCrop.left);
-    const rightPx = Math.round(playerRect.width * this.letterboxCrop.right);
+    const { top: topPx, bottom: bottomPx, left: leftPx, right: rightPx } = computeBarFillPixels(playerRect, this.letterboxCrop);
 
-    this.container.style.setProperty('--lumaborder-letterbox-top', `${topPx}px`);
-    this.container.style.setProperty('--lumaborder-letterbox-bottom', `${bottomPx}px`);
-    this.container.style.setProperty('--lumaborder-pillarbox-left', `${leftPx}px`);
-    this.container.style.setProperty('--lumaborder-pillarbox-right', `${rightPx}px`);
+    if (this._lastBarPx.top !== topPx) {
+      this._lastBarPx.top = topPx;
+      this.container.style.setProperty('--lumaborder-letterbox-top', `${topPx}px`);
+    }
+    if (this._lastBarPx.bottom !== bottomPx) {
+      this._lastBarPx.bottom = bottomPx;
+      this.container.style.setProperty('--lumaborder-letterbox-bottom', `${bottomPx}px`);
+    }
+    if (this._lastBarPx.left !== leftPx) {
+      this._lastBarPx.left = leftPx;
+      this.container.style.setProperty('--lumaborder-pillarbox-left', `${leftPx}px`);
+    }
+    if (this._lastBarPx.right !== rightPx) {
+      this._lastBarPx.right = rightPx;
+      this.container.style.setProperty('--lumaborder-pillarbox-right', `${rightPx}px`);
+    }
   }
 
   drawFrame() {
@@ -808,35 +890,27 @@ export class AmbientEngine {
     const vw = this.video.videoWidth || this.canvasWidth;
     const vh = this.video.videoHeight || this.canvasHeight;
 
-    const cropL = Math.max(0, Math.min(0.4, this.letterboxCrop.left));
-    const cropR = Math.max(0, Math.min(0.4, this.letterboxCrop.right));
-    const cropT = Math.max(0, Math.min(0.4, this.letterboxCrop.top));
-    const cropB = Math.max(0, Math.min(0.4, this.letterboxCrop.bottom));
+    const { sx, sy, sw, sh, cropL, cropR, cropT, cropB } = computeSourceRect(vw, vh, this.letterboxCrop);
 
-    const sx = Math.max(0, Math.floor(vw * cropL));
-    const sy = Math.max(0, Math.floor(vh * cropT));
-    const sw = Math.min(vw - sx, Math.max(10, Math.floor(vw * (1 - cropL - cropR))));
-    const sh = Math.min(vh - sy, Math.max(10, Math.floor(vh * (1 - cropT - cropB))));
-
-    // Audio-reactive nabız faktörü (Item 3.1)
+    // Audio-reactive nabız faktörü (GPU composited transform - Item 4)
     let audioPulse = 1.0;
     if (this.audioEngine && this.settings.audioReactive) {
       audioPulse = this.audioEngine.update();
-      if (audioPulse > 1.02) {
-        const pulseScale = (1 + (this.settings.spread / 100)) * audioPulse;
-        this.container.style.setProperty('--lumaborder-scale', pulseScale.toFixed(2));
+      if (Math.abs(audioPulse - this._lastAudioPulse) > 0.005) {
+        this._lastAudioPulse = audioPulse;
+        this.container.style.transform = `scale(${audioPulse.toFixed(3)}) translateZ(0)`;
       }
+    } else if (this._lastAudioPulse !== 1.0) {
+      this._lastAudioPulse = 1.0;
+      this.container.style.transform = 'translateZ(0)';
     }
 
     // 4-Bölge Kenar Ağırlıkları (Item 2.1)
-    const edgeWeights = [
-      this.settings.edgeTop ? (this.settings.edgeTopSpread / 100) : 0.0,
-      this.settings.edgeRight ? (this.settings.edgeRightSpread / 100) : 0.0,
-      this.settings.edgeBottom ? (this.settings.edgeBottomSpread / 100) : 0.0,
-      this.settings.edgeLeft ? (this.settings.edgeLeftSpread / 100) : 0.0
-    ];
+    const edgeWeights = computeEdgeWeights(this.settings);
 
     try {
+      const maxPasses = getMaxBlurPasses(this.dropSentinel.penaltyLevel);
+
       // 1. WebGL 2.0 Dual-Kawase Pipeline (Item 1.1)
       if (this.isWebGLActive && this.webglEngine && this.webglEngine.isReady) {
         this.webglEngine.render(this.video, {
@@ -847,7 +921,8 @@ export class AmbientEngine {
           kelvin: this.effectiveKelvin,
           debanding: Boolean(this.settings.debanding),
           hdrTonemap: Boolean(this.settings.hdrTonemap),
-          edgeWeights
+          edgeWeights,
+          maxPasses
         });
       } else if (this.ctx) {
         // 2. Canvas 2D Fallback Pipeline
@@ -858,9 +933,12 @@ export class AmbientEngine {
         );
       }
 
-      // 2. Katman: Tight Core Glow
+      // 2. Katman: Tight Core Glow (Zero-Readback: inputCanvas üzerinden GPU stall sıfırlama - Item 3)
       if (this.settings.dualLayerGlow && this.ctxTight) {
-        this.ctxTight.drawImage(this.canvasDiffuse, 0, 0);
+        const source = (this.isWebGLActive && this.webglEngine?.inputCanvas)
+          ? this.webglEngine.inputCanvas
+          : this.canvasDiffuse;
+        this.ctxTight.drawImage(source, 0, 0);
       }
     } catch (err) {
       this.warnOnce('drawFrame', err);
@@ -881,8 +959,9 @@ export class AmbientEngine {
     this.isShorts = location.pathname.startsWith('/shorts') ||
       Boolean(this.player.closest('ytd-shorts, ytd-reel-video-renderer, #shorts-player'));
 
-    this.canvasWidth = this.isShorts ? 108 : 192;
-    this.canvasHeight = this.isShorts ? 192 : 108;
+    const dims = getCanvasDimensions(this.isShorts, this.settings.ultraEco);
+    this.canvasWidth = dims.width;
+    this.canvasHeight = dims.height;
 
     if (this.canvasDiffuse) {
       this.canvasDiffuse.width = this.canvasWidth;
@@ -900,8 +979,7 @@ export class AmbientEngine {
       this.canvasMultiZone.height = this.canvasHeight;
     }
 
-    const aW = this.isShorts ? 18 : 32;
-    const aH = this.isShorts ? 32 : 18;
+    const { width: aW, height: aH } = getAnalysisCanvasSize(this.isShorts);
     if (this.analysisCanvas) {
       this.analysisCanvas.width = aW;
       this.analysisCanvas.height = aH;
